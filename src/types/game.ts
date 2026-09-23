@@ -105,6 +105,7 @@ export interface KillFeedEvent {
 
 export interface RoomState {
   code: string;
+  hostId?: string;
   mode: GameMode;
   state: 'waiting' | 'playing' | 'round_end';
   redScore: number;
@@ -113,6 +114,18 @@ export interface RoomState {
   maxRounds: number;
   roundTimeLeft: number;
   players: PlayerNetState[];
+}
+
+export interface ActiveRoomInfo {
+  code: string;
+  mode: GameMode;
+  state: 'waiting' | 'playing' | 'round_end';
+  playerCount: number;
+  maxPlayers: number;
+  redCount: number;
+  blueCount: number;
+  hostName: string;
+  isFull: boolean;
 }
 
 export interface HitEffect {

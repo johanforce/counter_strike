@@ -87,8 +87,6 @@ export class FPSGameEngine {
   // Knife Combat Visuals
   private knifeSwingTime: number = 0;
   private knifeSwingType: 'slash' | 'stab' = 'slash';
-  private slashArcMesh: THREE.Mesh | null = null;
-  private slashArcStartTime: number = 0;
 
   // Movement & Camera Controls
   private playerPos = new THREE.Vector3(-28, 1.6, -28);
@@ -162,6 +160,8 @@ export class FPSGameEngine {
       roomCode?: string;
       settings: GameSettings;
       botDifficulty?: 'easy' | 'normal' | 'hard';
+      existingWs?: WebSocket;
+      localPlayerId?: string;
     }
   ) {
     this.container = container;
@@ -172,7 +172,7 @@ export class FPSGameEngine {
     this.mode = options.mode;
     this.isOnlineMode = options.isOnline;
     this.roomCode = options.roomCode || 'SOLO_' + Math.random().toString(36).substring(2, 6).toUpperCase();
-    this.localPlayerId = 'player_' + Math.random().toString(36).substring(2, 9);
+    this.localPlayerId = options.localPlayerId || ('player_' + Math.random().toString(36).substring(2, 9));
 
     // 1. Scene & Renderer
     this.scene = new THREE.Scene();
@@ -231,14 +231,17 @@ export class FPSGameEngine {
 
     this.ak47Rig = createFirstPersonAK47();
     this.ak47Rig.group.position.set(0.24, -0.22, -0.45);
+    this.ak47Rig.group.visible = false;
     this.fpCameraRig.add(this.ak47Rig.group);
 
     this.pistolRig = createFirstPersonPistol();
     this.pistolRig.group.position.set(0.22, -0.2, -0.4);
+    this.pistolRig.group.visible = false;
     this.fpCameraRig.add(this.pistolRig.group);
 
     this.knifeRig = createFirstPersonKnife();
     this.knifeRig.group.position.set(0.25, -0.24, -0.42);
+    this.knifeRig.group.visible = false;
     this.fpCameraRig.add(this.knifeRig.group);
 
     // Muzzle flash particle sprite for firearms
@@ -252,7 +255,8 @@ export class FPSGameEngine {
     this.muzzleFlashLight = new THREE.PointLight(0xffaa22, 0, 8);
     this.fpCameraRig.add(this.muzzleFlashLight);
 
-    this.setWeapon('ak47');
+    // Force set weapon to AK47 and ensure ONLY AK47 is visible
+    this.setWeapon('ak47', true);
 
     // 5. Bot Manager for Solo and Filling Teams
     this.botManager = new BotManager(
@@ -267,7 +271,12 @@ export class FPSGameEngine {
     if (!this.isOnlineMode) {
       this.setupOfflineMatch(options.botDifficulty || 'normal');
     } else {
-      this.initWebSocket();
+      if (options.existingWs) {
+        this.ws = options.existingWs;
+        this.attachWebSocketListeners();
+      } else {
+        this.initWebSocket();
+      }
     }
 
     // 6. Listeners & Events
@@ -302,6 +311,28 @@ export class FPSGameEngine {
     }
   }
 
+  private attachWebSocketListeners() {
+    if (!this.ws) return;
+    this.callbacks.onConnectionChange(true);
+
+    this.ws.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+        this.handleNetworkMessage(msg);
+      } catch (e) {
+        console.error('[WS] Parse error:', e);
+      }
+    };
+
+    this.ws.onclose = () => {
+      this.callbacks.onConnectionChange(false);
+    };
+
+    this.ws.onerror = (err) => {
+      console.warn('[WS] Error:', err);
+    };
+  }
+
   private initWebSocket() {
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${proto}//${window.location.host}/ws`;
@@ -310,23 +341,15 @@ export class FPSGameEngine {
       this.ws = new WebSocket(wsUrl);
 
       this.ws.onopen = () => {
-        this.callbacks.onConnectionChange(true);
+        this.attachWebSocketListeners();
         this.ws?.send(JSON.stringify({
           type: 'join_room',
           roomCode: this.roomCode,
           playerName: this.playerName,
           team: this.team,
-          mode: this.mode
+          mode: this.mode,
+          playerId: this.localPlayerId
         }));
-      };
-
-      this.ws.onmessage = (event) => {
-        try {
-          const msg = JSON.parse(event.data);
-          this.handleNetworkMessage(msg);
-        } catch (e) {
-          console.error('[WS] Parse error:', e);
-        }
       };
 
       this.ws.onclose = () => {
@@ -635,12 +658,12 @@ export class FPSGameEngine {
     document.exitPointerLock?.();
   }
 
-  public setWeapon(weapon: WeaponType) {
-    if (this.currentWeapon === weapon && !this.isReloading) return;
+  public setWeapon(weapon: WeaponType, force: boolean = false) {
+    if (!force && this.currentWeapon === weapon && !this.isReloading) return;
     this.currentWeapon = weapon;
     this.isReloading = false;
 
-    // Viewmodel visibility
+    // Viewmodel visibility - strictly ensure only the active weapon is visible
     this.ak47Rig.group.visible = weapon === 'ak47';
     this.pistolRig.group.visible = weapon === 'pistol';
     this.knifeRig.group.visible = weapon === 'knife';
@@ -722,9 +745,6 @@ export class FPSGameEngine {
 
     // Play knife whoosh slash sound
     sounds.playKnifeSlash();
-
-    // Create visual 3D crescent slash arc
-    this.createSlashArcVisual(isHeavy);
 
     // Short-range melee raycast (2.5m slash, 2.8m stab)
     const meleeRange = isHeavy ? 2.8 : 2.4;
@@ -809,46 +829,6 @@ export class FPSGameEngine {
         this.createSparkParticles(hit.point);
       }
     }
-  }
-
-  // Visual crescent blade slash arc
-  private createSlashArcVisual(isHeavy: boolean) {
-    if (this.slashArcMesh) {
-      this.fpCameraRig.remove(this.slashArcMesh);
-      this.slashArcMesh.geometry.dispose();
-      (this.slashArcMesh.material as THREE.Material).dispose();
-      this.slashArcMesh = null;
-    }
-
-    const slashArcShape = new THREE.Shape();
-    if (!isHeavy) {
-      // Sweeping wide crescent arc
-      slashArcShape.absarc(0, 0, 0.44, -Math.PI * 0.28, Math.PI * 0.38, false);
-      slashArcShape.absarc(0, 0, 0.32, Math.PI * 0.38, -Math.PI * 0.28, true);
-    } else {
-      // Forward thrust blade streak
-      slashArcShape.moveTo(0, -0.06);
-      slashArcShape.lineTo(0.18, 0);
-      slashArcShape.lineTo(0, 0.06);
-      slashArcShape.lineTo(-0.18, 0);
-      slashArcShape.closePath();
-    }
-
-    const geo = new THREE.ShapeGeometry(slashArcShape, 16);
-    const mat = new THREE.MeshBasicMaterial({
-      color: isHeavy ? 0xffea9f : 0xe0f2fe,
-      transparent: true,
-      opacity: 0.95,
-      blending: THREE.AdditiveBlending,
-      side: THREE.DoubleSide,
-      depthWrite: false
-    });
-
-    this.slashArcMesh = new THREE.Mesh(geo, mat);
-    this.slashArcMesh.position.set(0.08, -0.06, -0.38);
-    this.slashArcMesh.rotation.set(-0.2, 0.25, -0.35);
-    this.slashArcStartTime = performance.now();
-    this.fpCameraRig.add(this.slashArcMesh);
   }
 
   private triggerMuzzleFlash() {
@@ -1493,22 +1473,6 @@ export class FPSGameEngine {
       }
     }
 
-    // Slash Arc fading effect
-    if (this.slashArcMesh) {
-      const arcElapsed = (now - this.slashArcStartTime) / 1000;
-      if (arcElapsed < 0.16) {
-        const p = arcElapsed / 0.16;
-        const mat = this.slashArcMesh.material as THREE.MeshBasicMaterial;
-        mat.opacity = (1 - p) * 0.95;
-        this.slashArcMesh.scale.set(1 + p * 0.5, 1 + p * 0.5, 1);
-      } else {
-        this.fpCameraRig.remove(this.slashArcMesh);
-        this.slashArcMesh.geometry.dispose();
-        (this.slashArcMesh.material as THREE.Material).dispose();
-        this.slashArcMesh = null;
-      }
-    }
-
     // Automatic weapon continuous fire check
     if (this.isFiring && WEAPONS[this.currentWeapon].isAutomatic) {
       this.triggerShoot();
@@ -1692,11 +1656,6 @@ export class FPSGameEngine {
       this.scene.remove(p.mesh);
       p.mesh.geometry.dispose();
     });
-
-    if (this.slashArcMesh) {
-      this.fpCameraRig.remove(this.slashArcMesh);
-      this.slashArcMesh.geometry.dispose();
-    }
 
     this.botManager.clearAll();
 

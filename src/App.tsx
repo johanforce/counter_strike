@@ -10,13 +10,15 @@ import {
   GameMode,
   KillFeedEvent,
   GameSettings,
-  BotDifficulty
+  BotDifficulty,
+  RoomState
 } from './types/game';
 import { FPSGameEngine } from './game/engine';
 import { HUD } from './components/HUD';
 import { Lobby } from './components/Lobby';
 import { Scoreboard } from './components/Scoreboard';
 import { SettingsModal } from './components/SettingsModal';
+import { WaitingRoom } from './components/WaitingRoom';
 
 interface GameConfig {
   playerName: string;
@@ -25,11 +27,19 @@ interface GameConfig {
   isOnline: boolean;
   roomCode?: string;
   botDifficulty: BotDifficulty;
+  isJoinOnly?: boolean;
 }
 
 export default function App() {
-  const [screen, setScreen] = useState<'lobby' | 'playing'>('lobby');
+  const [screen, setScreen] = useState<'lobby' | 'waiting' | 'playing'>('lobby');
   const [gameConfig, setGameConfig] = useState<GameConfig | null>(null);
+
+  // Multiplayer Waiting Room States
+  const [roomState, setRoomState] = useState<RoomState | null>(null);
+  const [localPlayerId, setLocalPlayerId] = useState<string>('');
+  const [isConnectingWs, setIsConnectingWs] = useState<boolean>(false);
+  const [wsError, setWsError] = useState<string | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
 
   // Settings
   const [settings, setSettings] = useState<GameSettings>({
@@ -77,10 +87,100 @@ export default function App() {
   const canvasContainerRef = useRef<HTMLDivElement | null>(null);
   const engineRef = useRef<FPSGameEngine | null>(null);
 
-  // Start game session
+  // Start game session from Lobby
   const handleStartGame = (config: GameConfig) => {
     setGameConfig(config);
-    setScreen('playing');
+    if (config.isOnline) {
+      setScreen('waiting');
+    } else {
+      setScreen('playing');
+    }
+  };
+
+  // Connect to Waiting Room WebSocket
+  useEffect(() => {
+    if (screen !== 'waiting' || !gameConfig || !gameConfig.isOnline) return;
+
+    setIsConnectingWs(true);
+    setWsError(null);
+
+    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${proto}//${window.location.host}/ws`;
+    const socket = new WebSocket(wsUrl);
+    wsRef.current = socket;
+
+    socket.onopen = () => {
+      setIsConnectingWs(false);
+      socket.send(JSON.stringify({
+        type: 'join_room',
+        roomCode: gameConfig.roomCode,
+        playerName: gameConfig.playerName,
+        preferredTeam: gameConfig.team,
+        mode: gameConfig.mode,
+        isJoinOnly: gameConfig.isJoinOnly
+      }));
+    };
+
+    socket.onmessage = (evt) => {
+      try {
+        const msg = JSON.parse(evt.data);
+        if (msg.type === 'joined_room') {
+          if (msg.playerId) setLocalPlayerId(msg.playerId);
+          if (msg.room) {
+            setRoomState(msg.room);
+            setGameConfig((prev) => prev ? {
+              ...prev,
+              mode: msg.room.mode || prev.mode,
+              roomCode: msg.room.code
+            } : null);
+          }
+        } else if (msg.type === 'player_joined' || msg.type === 'player_left' || msg.type === 'player_updated') {
+          if (msg.room) setRoomState(msg.room);
+        } else if (msg.type === 'match_started') {
+          if (msg.room) setRoomState(msg.room);
+          setScreen('playing');
+        } else if (msg.type === 'error') {
+          setWsError(msg.message || 'Lỗi kết nối phòng');
+        }
+      } catch (e) {
+        console.error('[WS] Parse error in waiting room:', e);
+      }
+    };
+
+    socket.onerror = () => {
+      setIsConnectingWs(false);
+      setWsError('Không thể kết nối tới máy chủ phòng.');
+    };
+
+    socket.onclose = () => {
+      setIsConnectingWs(false);
+    };
+
+    return () => {
+      // Do not force-close socket if transitioning to playing
+    };
+  }, [screen, gameConfig]);
+
+  const handleHostStartMatch = () => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'start_match' }));
+    }
+  };
+
+  const handleSwitchTeam = (newTeam: Team) => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'switch_team', team: newTeam }));
+      setGameConfig((prev) => (prev ? { ...prev, team: newTeam } : null));
+    }
+  };
+
+  const handleLeaveWaitingRoom = () => {
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+    setRoomState(null);
+    setScreen('lobby');
   };
 
   // Tab key listener for Scoreboard
@@ -168,7 +268,9 @@ export default function App() {
         isOnline: gameConfig.isOnline,
         roomCode: gameConfig.roomCode,
         botDifficulty: gameConfig.botDifficulty,
-        settings
+        settings,
+        existingWs: gameConfig.isOnline && wsRef.current ? wsRef.current : undefined,
+        localPlayerId: gameConfig.isOnline && localPlayerId ? localPlayerId : undefined
       }
     );
 
@@ -192,18 +294,40 @@ export default function App() {
       engineRef.current.dispose();
       engineRef.current = null;
     }
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+    setRoomState(null);
     setIsSettingsOpen(false);
     setScreen('lobby');
   };
 
   return (
     <div className="relative w-screen h-screen bg-black overflow-hidden select-none">
-      {screen === 'lobby' ? (
+      {screen === 'lobby' && (
         <Lobby
           onStartGame={handleStartGame}
           onOpenSettings={() => setIsSettingsOpen(true)}
         />
-      ) : (
+      )}
+
+      {screen === 'waiting' && gameConfig && (
+        <WaitingRoom
+          roomState={roomState}
+          localPlayerId={localPlayerId}
+          playerName={gameConfig.playerName}
+          roomCode={gameConfig.roomCode || ''}
+          mode={gameConfig.mode}
+          isConnecting={isConnectingWs}
+          errorMsg={wsError}
+          onStartGame={handleHostStartMatch}
+          onLeaveRoom={handleLeaveWaitingRoom}
+          onSwitchTeam={handleSwitchTeam}
+        />
+      )}
+
+      {screen === 'playing' && (
         <div className="relative w-full h-full">
           {/* 3D WebGL Canvas Container */}
           <div ref={canvasContainerRef} className="w-full h-full cursor-crosshair" />
@@ -273,7 +397,7 @@ export default function App() {
         <div className="fixed bottom-10 left-1/2 -translate-x-1/2 z-50">
           <button
             onClick={handleQuitToLobby}
-            className="bg-red-900/90 hover:bg-red-800 text-white font-mono font-bold px-6 py-2.5 rounded-lg border border-red-500 shadow-2xl transition-all"
+            className="bg-red-900/90 hover:bg-red-800 text-white font-mono font-bold px-6 py-2.5 rounded-lg border border-red-500 shadow-2xl transition-all cursor-pointer"
           >
             RỜI TRẬN ĐẤU VỀ MENU CHÍNH
           </button>

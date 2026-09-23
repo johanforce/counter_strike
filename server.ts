@@ -36,6 +36,7 @@ interface PlayerState {
 
 interface Room {
   code: string;
+  hostId: string;
   mode: '1v1' | '2v2';
   state: 'waiting' | 'playing' | 'round_end';
   redScore: number;
@@ -49,6 +50,65 @@ interface Room {
 }
 
 const rooms = new Map<string, Room>();
+
+// REST API for active room discovery and existence checking
+app.get('/api/rooms', (_req, res) => {
+  const activeRooms: any[] = [];
+  rooms.forEach(r => {
+    let redCount = 0;
+    let blueCount = 0;
+    r.players.forEach(p => {
+      if (p.team === 'red') redCount++;
+      else blueCount++;
+    });
+    const maxPlayers = r.mode === '1v1' ? 2 : 4;
+    const hostPlayer = r.players.get(r.hostId);
+    activeRooms.push({
+      code: r.code,
+      mode: r.mode,
+      state: r.state,
+      playerCount: r.players.size,
+      maxPlayers,
+      redCount,
+      blueCount,
+      hostName: hostPlayer?.name || 'Chủ phòng',
+      isFull: r.players.size >= maxPlayers
+    });
+  });
+  res.json({ rooms: activeRooms });
+});
+
+app.get('/api/rooms/:code', (req, res) => {
+  const code = (req.params.code || '').trim().toUpperCase();
+  const room = rooms.get(code);
+  if (!room) {
+    return res.status(404).json({ exists: false, message: `Không tìm thấy phòng với mã "${code}".` });
+  }
+
+  let redCount = 0;
+  let blueCount = 0;
+  room.players.forEach(p => {
+    if (p.team === 'red') redCount++;
+    else blueCount++;
+  });
+
+  const maxPlayers = room.mode === '1v1' ? 2 : 4;
+  const hostPlayer = room.players.get(room.hostId);
+
+  return res.json({
+    exists: true,
+    code: room.code,
+    mode: room.mode,
+    state: room.state,
+    playerCount: room.players.size,
+    maxPlayers,
+    redCount,
+    blueCount,
+    isFull: room.players.size >= maxPlayers,
+    isPlaying: room.state !== 'waiting',
+    hostName: hostPlayer?.name || 'Chủ phòng'
+  });
+});
 
 const SPAWN_POINTS = {
   red: [
@@ -81,6 +141,7 @@ function getRoomSnapshot(room: Room) {
   room.players.forEach(p => players.push({ ...p }));
   return {
     code: room.code,
+    hostId: room.hostId,
     mode: room.mode,
     state: room.state,
     redScore: room.redScore,
@@ -213,11 +274,39 @@ wss.on('connection', (ws: WebSocket) => {
       const type = data.type;
 
       if (type === 'join_room') {
-        const { roomCode, playerName, mode, preferredTeam } = data;
-        let room = rooms.get(roomCode);
+        const { roomCode, playerName, mode, preferredTeam, isJoinOnly } = data;
+        const normalizedCode = (roomCode || '').toString().trim().toUpperCase();
+
+        if (!normalizedCode) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Vui lòng nhập mã phòng hợp lệ!' }));
+          return;
+        }
+
+        let room = rooms.get(normalizedCode);
+        const playerId = data.playerId || 'player_' + Math.random().toString(36).substring(2, 8);
+        currentPlayerId = playerId;
+        currentRoomCode = normalizedCode;
+
+        if (isJoinOnly && !room) {
+          ws.send(JSON.stringify({
+            type: 'error',
+            message: `Không tìm thấy phòng với mã "${normalizedCode}". Vui lòng kiểm tra lại mã hoặc tạo phòng mới!`
+          }));
+          return;
+        }
+
+        if (room && isJoinOnly && room.state !== 'waiting') {
+          ws.send(JSON.stringify({
+            type: 'error',
+            message: `Phòng "${normalizedCode}" đang diễn ra trận đấu! Không thể tham gia lúc này.`
+          }));
+          return;
+        }
+
         if (!room) {
           room = {
-            code: roomCode,
+            code: normalizedCode,
+            hostId: playerId,
             mode: mode || '1v1',
             state: 'waiting',
             redScore: 0,
@@ -229,18 +318,22 @@ wss.on('connection', (ws: WebSocket) => {
             roundTimeLeft: 90,
             lastTick: Date.now()
           };
-          rooms.set(roomCode, room);
+          rooms.set(normalizedCode, room);
+        }
+
+        // If no active host in room, set this player as host
+        if (!room.hostId || !room.players.has(room.hostId)) {
+          room.hostId = playerId;
         }
 
         const maxPlayers = room.mode === '1v1' ? 2 : 4;
-        if (room.players.size >= maxPlayers && !room.players.has(data.playerId)) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Phòng đã đầy người chơi!' }));
+        if (room.players.size >= maxPlayers && !room.players.has(playerId)) {
+          ws.send(JSON.stringify({
+            type: 'error',
+            message: `Phòng "${normalizedCode}" đã đủ ${maxPlayers} người chơi!`
+          }));
           return;
         }
-
-        const playerId = data.playerId || 'player_' + Math.random().toString(36).substring(2, 8);
-        currentPlayerId = playerId;
-        currentRoomCode = roomCode;
 
         // Determine team and slot
         let team: 'red' | 'blue' = 'red';
@@ -284,16 +377,6 @@ wss.on('connection', (ws: WebSocket) => {
         room.players.set(playerId, player);
         room.wsClients.set(playerId, ws);
 
-        // If enough players or already started, begin round
-        if (room.state === 'waiting' && room.players.size >= (room.mode === '1v1' ? 2 : 4)) {
-          room.state = 'playing';
-          room.roundTimeLeft = 90;
-        } else if (room.state === 'waiting' && room.players.size >= 1) {
-          // Allow single player to explore map or fight bots
-          room.state = 'playing';
-          room.roundTimeLeft = 90;
-        }
-
         ws.send(JSON.stringify({
           type: 'joined_room',
           playerId,
@@ -306,6 +389,54 @@ wss.on('connection', (ws: WebSocket) => {
           player,
           room: getRoomSnapshot(room)
         }, playerId);
+      }
+
+      else if (type === 'switch_team') {
+        const room = rooms.get(currentRoomCode);
+        if (!room) return;
+        const p = room.players.get(currentPlayerId);
+        if (!p) return;
+
+        const maxPerTeam = room.mode === '1v1' ? 1 : 2;
+        const targetTeam = data.team === 'blue' ? 'blue' : 'red';
+        let count = 0;
+        room.players.forEach(other => {
+          if (other.id !== p.id && other.team === targetTeam) count++;
+        });
+
+        if (count < maxPerTeam) {
+          p.team = targetTeam;
+          p.slot = count;
+          const spawn = getSpawn(p.team, p.slot);
+          p.x = spawn.x;
+          p.y = spawn.y;
+          p.z = spawn.z;
+          p.rotY = spawn.rotY;
+
+          broadcastToRoom(room, {
+            type: 'player_updated',
+            player: p,
+            room: getRoomSnapshot(room)
+          });
+        }
+      }
+
+      else if (type === 'start_match') {
+        const room = rooms.get(currentRoomCode);
+        if (!room) return;
+        if (room.hostId !== currentPlayerId) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Chỉ chủ phòng mới có quyền bắt đầu trận đấu!' }));
+          return;
+        }
+
+        room.state = 'playing';
+        room.roundTimeLeft = 90;
+        startNewRound(room);
+
+        broadcastToRoom(room, {
+          type: 'match_started',
+          room: getRoomSnapshot(room)
+        });
       }
 
       else if (type === 'player_move') {
@@ -474,6 +605,13 @@ wss.on('connection', (ws: WebSocket) => {
       if (room) {
         room.players.delete(currentPlayerId);
         room.wsClients.delete(currentPlayerId);
+
+        if (room.hostId === currentPlayerId && room.players.size > 0) {
+          const nextHost = room.players.keys().next().value;
+          if (nextHost) {
+            room.hostId = nextHost;
+          }
+        }
 
         broadcastToRoom(room, {
           type: 'player_left',

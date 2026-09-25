@@ -223,7 +223,7 @@ export class BotManager {
         // Combat state: Face target
         const dx = activeTarget.position.x - bot.position.x;
         const dz = activeTarget.position.z - bot.position.z;
-        const desiredRotY = Math.atan2(dx, dz);
+        const desiredRotY = Math.atan2(-dx, -dz);
         bot.rotY = desiredRotY;
 
         // Strafe during gunfight
@@ -247,39 +247,38 @@ export class BotManager {
           bot.meshData.updateWeapon('ak47');
         }
 
-        // Shooting cadence
-        const reactionDelay = bot.difficulty === 'hard' ? 220 : bot.difficulty === 'normal' ? 380 : 600;
-        const shootInterval = bot.weapon === 'ak47' ? 140 : bot.weapon === 'pistol' ? 280 : 450;
+        // Shooting cadence with realistic burst pauses
+        const shootInterval = bot.weapon === 'ak47' ? 150 : bot.weapon === 'pistol' ? 300 : 450;
+        const maxBurst = bot.weapon === 'ak47' ? 3 : 2;
+        const burstPause = bot.difficulty === 'hard' ? 600 : bot.difficulty === 'normal' ? 850 : 1200;
 
-        if (now - bot.lastShotTime > shootInterval) {
-          bot.burstCount++;
-          if (bot.weapon === 'ak47' && bot.burstCount > 4) {
-            // Recoil pause between bursts
-            if (now - bot.lastShotTime > 650) {
-              bot.burstCount = 0;
-            }
-          } else {
-            bot.lastShotTime = now;
-
-            // Compute fire direction with difficulty spread
-            const spreadFactor = bot.difficulty === 'hard' ? 0.02 : bot.difficulty === 'normal' ? 0.05 : 0.09;
-            const spreadX = (Math.random() - 0.5) * spreadFactor;
-            const spreadY = (Math.random() - 0.5) * spreadFactor;
-
-            const eyePos = bot.position.clone().setY(bot.position.y + 0.1);
-            const aimDir = new THREE.Vector3()
-              .subVectors(activeTarget.position, eyePos)
-              .normalize()
-              .add(new THREE.Vector3(spreadX, spreadY, 0))
-              .normalize();
-
-            // Sound
-            if (bot.weapon === 'ak47') sounds.playAK47Shot();
-            else if (bot.weapon === 'pistol') sounds.playPistolShot();
-            else sounds.playKnifeSlash();
-
-            this.onBotShoot(bot, eyePos, aimDir);
+        // Check if bot is in pause between bursts
+        if (bot.burstCount >= maxBurst) {
+          if (now - bot.lastShotTime > burstPause) {
+            bot.burstCount = 0;
           }
+        } else if (now - bot.lastShotTime > shootInterval) {
+          bot.burstCount++;
+          bot.lastShotTime = now;
+
+          // Compute fire direction with fair, human-like spread
+          const spreadFactor = bot.difficulty === 'hard' ? 0.035 : bot.difficulty === 'normal' ? 0.065 : 0.11;
+          const spreadX = (Math.random() - 0.5) * spreadFactor;
+          const spreadY = (Math.random() - 0.5) * spreadFactor;
+
+          const eyePos = bot.position.clone().setY(bot.position.y + 0.1);
+          const aimDir = new THREE.Vector3()
+            .subVectors(activeTarget.position, eyePos)
+            .normalize()
+            .add(new THREE.Vector3(spreadX, spreadY, 0))
+            .normalize();
+
+          // Sound
+          if (bot.weapon === 'ak47') sounds.playAK47Shot();
+          else if (bot.weapon === 'pistol') sounds.playPistolShot();
+          else sounds.playKnifeSlash();
+
+          this.onBotShoot(bot, eyePos, aimDir);
         }
       } else {
         // Patrol state: Move along waypoints
@@ -293,7 +292,7 @@ export class BotManager {
           bot.currentWaypointIdx = (bot.currentWaypointIdx + 1) % this.waypoints.length;
         } else {
           toWp.normalize();
-          const targetRotY = Math.atan2(toWp.x, toWp.z);
+          const targetRotY = Math.atan2(-toWp.x, -toWp.z);
           bot.rotY = targetRotY;
           bot.position.add(toWp.multiplyScalar(moveSpeed * delta));
         }

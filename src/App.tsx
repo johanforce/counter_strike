@@ -36,7 +36,14 @@ export default function App() {
 
   // Multiplayer Waiting Room States
   const [roomState, setRoomState] = useState<RoomState | null>(null);
-  const [localPlayerId, setLocalPlayerId] = useState<string>('');
+  const [localPlayerId] = useState<string>(() => {
+    let id = sessionStorage.getItem('cs_player_id');
+    if (!id) {
+      id = 'p_' + Math.random().toString(36).substring(2, 9);
+      sessionStorage.setItem('cs_player_id', id);
+    }
+    return id;
+  });
   const [isConnectingWs, setIsConnectingWs] = useState<boolean>(false);
   const [wsError, setWsError] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -56,6 +63,7 @@ export default function App() {
 
   // In-Game Live HUD States
   const [health, setHealth] = useState<number>(100);
+  const [armor, setArmor] = useState<number>(100);
   const [ammo, setAmmo] = useState<number>(30);
   const [reserveAmmo, setReserveAmmo] = useState<number>(90);
   const [weapon, setWeapon] = useState<WeaponType>('ak47');
@@ -70,9 +78,9 @@ export default function App() {
   const [respawnTimer, setRespawnTimer] = useState<number>(0);
   const [killFeed, setKillFeed] = useState<KillFeedEvent[]>([]);
   const [radarData, setRadarData] = useState<{
-    playerPos: { x: number; z: number; rotY: number };
-    allies: { x: number; z: number }[];
-    enemies: { x: number; z: number }[];
+    playerPos: { x: number; y: number; z: number; rotY: number };
+    allies: { x: number; y: number; z: number; name?: string; rotY?: number }[];
+    enemies: { x: number; y: number; z: number; rotY?: number }[];
   } | null>(null);
   const [roundStatus, setRoundStatus] = useState<{
     show: boolean;
@@ -101,6 +109,11 @@ export default function App() {
   useEffect(() => {
     if (screen !== 'waiting' || !gameConfig || !gameConfig.isOnline) return;
 
+    // Prevent duplicate sockets if already active
+    if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {
+      return;
+    }
+
     setIsConnectingWs(true);
     setWsError(null);
 
@@ -117,7 +130,8 @@ export default function App() {
         playerName: gameConfig.playerName,
         preferredTeam: gameConfig.team,
         mode: gameConfig.mode,
-        isJoinOnly: gameConfig.isJoinOnly
+        isJoinOnly: gameConfig.isJoinOnly,
+        playerId: localPlayerId
       }));
     };
 
@@ -125,14 +139,8 @@ export default function App() {
       try {
         const msg = JSON.parse(evt.data);
         if (msg.type === 'joined_room') {
-          if (msg.playerId) setLocalPlayerId(msg.playerId);
           if (msg.room) {
             setRoomState(msg.room);
-            setGameConfig((prev) => prev ? {
-              ...prev,
-              mode: msg.room.mode || prev.mode,
-              roomCode: msg.room.code
-            } : null);
           }
         } else if (msg.type === 'player_joined' || msg.type === 'player_left' || msg.type === 'player_updated') {
           if (msg.room) setRoomState(msg.room);
@@ -159,7 +167,7 @@ export default function App() {
     return () => {
       // Do not force-close socket if transitioning to playing
     };
-  }, [screen, gameConfig]);
+  }, [screen]);
 
   const handleHostStartMatch = () => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -170,7 +178,12 @@ export default function App() {
   const handleSwitchTeam = (newTeam: Team) => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: 'switch_team', team: newTeam }));
-      setGameConfig((prev) => (prev ? { ...prev, team: newTeam } : null));
+    }
+  };
+
+  const handleAddBot = (team: Team) => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'add_bot', team }));
     }
   };
 
@@ -216,6 +229,7 @@ export default function App() {
 
     // Reset scores & HUD
     setHealth(100);
+    setArmor(100);
     setAmmo(30);
     setReserveAmmo(90);
     setWeapon('ak47');
@@ -232,6 +246,7 @@ export default function App() {
       {
         onHUDUpdate: (hud) => {
           setHealth(hud.health);
+          setArmor(hud.armor);
           setAmmo(hud.ammo);
           setReserveAmmo(hud.reserveAmmo);
           setWeapon(hud.weapon);
@@ -259,18 +274,23 @@ export default function App() {
         },
         onConnectionChange: (connected) => {
           console.log('[Multiplayer] Connected:', connected);
+        },
+        onRoomUpdate: (updatedRoom) => {
+          setRoomState(updatedRoom);
         }
       },
       {
-        playerName: gameConfig.playerName,
-        team: gameConfig.team,
-        mode: gameConfig.mode,
+        playerName: (gameConfig.isOnline && roomState?.players.find(p => p.id === localPlayerId)?.name) || gameConfig.playerName,
+        team: (gameConfig.isOnline && roomState?.players.find(p => p.id === localPlayerId)?.team) || gameConfig.team,
+        mode: (gameConfig.isOnline && roomState?.mode) || gameConfig.mode,
         isOnline: gameConfig.isOnline,
         roomCode: gameConfig.roomCode,
         botDifficulty: gameConfig.botDifficulty,
         settings,
         existingWs: gameConfig.isOnline && wsRef.current ? wsRef.current : undefined,
-        localPlayerId: gameConfig.isOnline && localPlayerId ? localPlayerId : undefined
+        localPlayerId: gameConfig.isOnline && localPlayerId ? localPlayerId : undefined,
+        initialRoomState: roomState,
+        isHost: roomState?.hostId === localPlayerId
       }
     );
 
@@ -318,12 +338,13 @@ export default function App() {
           localPlayerId={localPlayerId}
           playerName={gameConfig.playerName}
           roomCode={gameConfig.roomCode || ''}
-          mode={gameConfig.mode}
+          mode={roomState?.mode || gameConfig.mode}
           isConnecting={isConnectingWs}
           errorMsg={wsError}
           onStartGame={handleHostStartMatch}
           onLeaveRoom={handleLeaveWaitingRoom}
           onSwitchTeam={handleSwitchTeam}
+          onAddBot={handleAddBot}
         />
       )}
 
@@ -335,6 +356,7 @@ export default function App() {
           {/* Retro Classic FPS HUD */}
           <HUD
             health={health}
+            armor={armor}
             ammo={ammo}
             reserveAmmo={reserveAmmo}
             weapon={weapon}
@@ -361,13 +383,27 @@ export default function App() {
             blueScore={blueScore}
             currentRound={round}
             localPlayer={{
-              name: gameConfig?.playerName || 'Bạn',
-              team: gameConfig?.team || 'red',
-              kills: 0,
-              deaths: isDead ? 1 : 0,
+              name: (gameConfig?.isOnline && roomState?.players.find(p => p.id === localPlayerId)?.name) || gameConfig?.playerName || 'Bạn',
+              team: (gameConfig?.isOnline && roomState?.players.find(p => p.id === localPlayerId)?.team) || gameConfig?.team || 'red',
+              kills: (gameConfig?.isOnline && roomState?.players.find(p => p.id === localPlayerId)?.kills) || 0,
+              deaths: (gameConfig?.isOnline && roomState?.players.find(p => p.id === localPlayerId)?.deaths) || (isDead ? 1 : 0),
               health
             }}
-            otherPlayers={[]}
+            otherPlayers={
+              gameConfig?.isOnline && roomState?.players
+                ? roomState.players
+                    .filter((p) => p.id !== localPlayerId)
+                    .map((p) => ({
+                      id: p.id,
+                      name: p.name,
+                      team: p.team,
+                      kills: p.kills,
+                      deaths: p.deaths,
+                      health: p.health,
+                      isBot: !!p.isBot
+                    }))
+                : []
+            }
           />
 
           {/* Quick Pause / Exit Button top left */}

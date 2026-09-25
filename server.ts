@@ -51,10 +51,62 @@ interface Room {
 
 const rooms = new Map<string, Room>();
 
+// Helper to remove any disconnected or dead sockets from a room
+function cleanStaleRoomPlayers(room: Room) {
+  const toDelete: string[] = [];
+  room.players.forEach((p, pId) => {
+    if (p.isBot) return; // Keep bots alive!
+    const clientWs = room.wsClients.get(pId);
+    if (!clientWs || clientWs.readyState === WebSocket.CLOSED || clientWs.readyState === WebSocket.CLOSING) {
+      toDelete.push(pId);
+    }
+  });
+
+  toDelete.forEach(pId => {
+    room.players.delete(pId);
+    room.wsClients.delete(pId);
+  });
+
+  // Check if any human players remain
+  let humanCount = 0;
+  for (const [, p] of room.players) {
+    if (!p.isBot) humanCount++;
+  }
+
+  // If no humans left, clean up bots and reset room
+  if (humanCount === 0) {
+    room.players.clear();
+    room.wsClients.clear();
+    room.state = 'waiting';
+    room.redScore = 0;
+    room.blueScore = 0;
+    room.round = 1;
+    room.hostId = '';
+    return;
+  }
+
+  // Ensure room has an active human host
+  const hostPlayer = room.players.get(room.hostId);
+  if (!hostPlayer || hostPlayer.isBot) {
+    for (const [id, p] of room.players) {
+      if (!p.isBot) {
+        room.hostId = id;
+        break;
+      }
+    }
+  }
+}
+
 // REST API for active room discovery and existence checking
 app.get('/api/rooms', (_req, res) => {
   const activeRooms: any[] = [];
-  rooms.forEach(r => {
+  rooms.forEach((r, code) => {
+    cleanStaleRoomPlayers(r);
+    if (r.players.size === 0) {
+      // Room has no active players, ignore or clean up
+      return;
+    }
+
     let redCount = 0;
     let blueCount = 0;
     r.players.forEach(p => {
@@ -85,6 +137,8 @@ app.get('/api/rooms/:code', (req, res) => {
     return res.status(404).json({ exists: false, message: `Không tìm thấy phòng với mã "${code}".` });
   }
 
+  cleanStaleRoomPlayers(room);
+
   let redCount = 0;
   let blueCount = 0;
   room.players.forEach(p => {
@@ -112,12 +166,12 @@ app.get('/api/rooms/:code', (req, res) => {
 
 const SPAWN_POINTS = {
   red: [
-    { x: -28, y: 1.6, z: -28, rotY: Math.PI / 4 },
-    { x: -32, y: 1.6, z: -24, rotY: Math.PI / 4 }
+    { x: -28, y: 1.6, z: -28, rotY: -3 * Math.PI / 4 },
+    { x: -32, y: 1.6, z: -24, rotY: -3 * Math.PI / 4 }
   ],
   blue: [
-    { x: 28, y: 1.6, z: 28, rotY: -3 * Math.PI / 4 },
-    { x: 24, y: 1.6, z: 32, rotY: -3 * Math.PI / 4 }
+    { x: 28, y: 1.6, z: 28, rotY: Math.PI / 4 },
+    { x: 24, y: 1.6, z: 32, rotY: Math.PI / 4 }
   ]
 };
 
@@ -255,6 +309,7 @@ function checkRoundStatus(room: Room) {
 // Server game tick (1 Hz for timer, 30 Hz for movement broadcasts)
 setInterval(() => {
   rooms.forEach(room => {
+    cleanStaleRoomPlayers(room);
     if (room.state === 'playing') {
       room.roundTimeLeft = Math.max(0, room.roundTimeLeft - 1);
       if (room.roundTimeLeft === 0) {
@@ -287,7 +342,11 @@ wss.on('connection', (ws: WebSocket) => {
         currentPlayerId = playerId;
         currentRoomCode = normalizedCode;
 
-        if (isJoinOnly && !room) {
+        if (room) {
+          cleanStaleRoomPlayers(room);
+        }
+
+        if (isJoinOnly && (!room || room.players.size === 0)) {
           ws.send(JSON.stringify({
             type: 'error',
             message: `Không tìm thấy phòng với mã "${normalizedCode}". Vui lòng kiểm tra lại mã hoặc tạo phòng mới!`
@@ -319,6 +378,39 @@ wss.on('connection', (ws: WebSocket) => {
             lastTick: Date.now()
           };
           rooms.set(normalizedCode, room);
+        } else if (room.players.size === 0) {
+          // Re-initialize empty room
+          room.hostId = playerId;
+          room.mode = mode || room.mode || '1v1';
+          room.state = 'waiting';
+          room.redScore = 0;
+          room.blueScore = 0;
+          room.round = 1;
+        }
+
+        // If player already in room (reconnect or tab switch)
+        if (room.players.has(playerId)) {
+          const existingPlayer = room.players.get(playerId)!;
+          if (playerName) existingPlayer.name = playerName;
+          room.wsClients.set(playerId, ws);
+
+          if (!room.hostId || !room.players.has(room.hostId)) {
+            room.hostId = playerId;
+          }
+
+          ws.send(JSON.stringify({
+            type: 'joined_room',
+            playerId,
+            player: existingPlayer,
+            room: getRoomSnapshot(room)
+          }));
+
+          broadcastToRoom(room, {
+            type: 'player_updated',
+            player: existingPlayer,
+            room: getRoomSnapshot(room)
+          }, playerId);
+          return;
         }
 
         // If no active host in room, set this player as host
@@ -327,7 +419,7 @@ wss.on('connection', (ws: WebSocket) => {
         }
 
         const maxPlayers = room.mode === '1v1' ? 2 : 4;
-        if (room.players.size >= maxPlayers && !room.players.has(playerId)) {
+        if (room.players.size >= maxPlayers) {
           ws.send(JSON.stringify({
             type: 'error',
             message: `Phòng "${normalizedCode}" đã đủ ${maxPlayers} người chơi!`
@@ -335,8 +427,8 @@ wss.on('connection', (ws: WebSocket) => {
           return;
         }
 
-        // Determine team and slot
-        let team: 'red' | 'blue' = 'red';
+        // Determine team and slot with per-team capacity limit
+        const maxPerTeam = room.mode === '1v1' ? 1 : 2;
         let redCount = 0;
         let blueCount = 0;
         room.players.forEach(p => {
@@ -344,10 +436,21 @@ wss.on('connection', (ws: WebSocket) => {
           else blueCount++;
         });
 
-        if (preferredTeam) {
-          team = preferredTeam;
+        let team: 'red' | 'blue' = 'red';
+        if (preferredTeam === 'blue' && blueCount < maxPerTeam) {
+          team = 'blue';
+        } else if (preferredTeam === 'red' && redCount < maxPerTeam) {
+          team = 'red';
+        } else if (redCount < maxPerTeam) {
+          team = 'red';
+        } else if (blueCount < maxPerTeam) {
+          team = 'blue';
         } else {
-          team = redCount <= blueCount ? 'red' : 'blue';
+          ws.send(JSON.stringify({
+            type: 'error',
+            message: `Phòng "${normalizedCode}" đã đủ người chơi ở cả hai đội!`
+          }));
+          return;
         }
 
         const slot = team === 'red' ? redCount : blueCount;
@@ -356,7 +459,7 @@ wss.on('connection', (ws: WebSocket) => {
         const player: PlayerState = {
           id: playerId,
           name: playerName || `TaySúng_${Math.floor(Math.random() * 900 + 100)}`,
-          roomCode,
+          roomCode: normalizedCode,
           team,
           slot,
           isBot: false,
@@ -429,6 +532,74 @@ wss.on('connection', (ws: WebSocket) => {
           return;
         }
 
+        // Auto-fill bots for empty slots to ensure both teams have combatants
+        const targetPerTeam = room.mode === '1v1' ? 1 : 2;
+        let redCount = 0;
+        let blueCount = 0;
+        room.players.forEach(p => {
+          if (p.team === 'red') redCount++;
+          else blueCount++;
+        });
+
+        const botNames = ['Shadow', 'Viper', 'Ghost', 'Raptor', 'Blaze', 'Striker', 'Titan', 'Apex'];
+        let nameIdx = 0;
+
+        // Auto-fill Red team bots if missing
+        while (redCount < targetPerTeam) {
+          const botId = 'bot_red_' + Math.random().toString(36).substring(2, 7);
+          const spawn = getSpawn('red', redCount);
+          const botPlayer: PlayerState = {
+            id: botId,
+            name: `${botNames[nameIdx++ % botNames.length]} [BOT]`,
+            roomCode: room.code,
+            team: 'red',
+            slot: redCount,
+            isBot: true,
+            x: spawn.x,
+            y: spawn.y,
+            z: spawn.z,
+            rotY: spawn.rotY,
+            pitch: 0,
+            health: 100,
+            kills: 0,
+            deaths: 0,
+            weapon: 'ak47',
+            isAlive: true,
+            ping: 0,
+            lastActive: Date.now()
+          };
+          room.players.set(botId, botPlayer);
+          redCount++;
+        }
+
+        // Auto-fill Blue team bots if missing
+        while (blueCount < targetPerTeam) {
+          const botId = 'bot_blue_' + Math.random().toString(36).substring(2, 7);
+          const spawn = getSpawn('blue', blueCount);
+          const botPlayer: PlayerState = {
+            id: botId,
+            name: `${botNames[nameIdx++ % botNames.length]} [BOT]`,
+            roomCode: room.code,
+            team: 'blue',
+            slot: blueCount,
+            isBot: true,
+            x: spawn.x,
+            y: spawn.y,
+            z: spawn.z,
+            rotY: spawn.rotY,
+            pitch: 0,
+            health: 100,
+            kills: 0,
+            deaths: 0,
+            weapon: 'ak47',
+            isAlive: true,
+            ping: 0,
+            lastActive: Date.now()
+          };
+          room.players.set(botId, botPlayer);
+          blueCount++;
+        }
+
         room.state = 'playing';
         room.roundTimeLeft = 90;
         startNewRound(room);
@@ -437,6 +608,15 @@ wss.on('connection', (ws: WebSocket) => {
           type: 'match_started',
           room: getRoomSnapshot(room)
         });
+      }
+
+      else if (type === 'request_sync') {
+        const room = rooms.get(currentRoomCode);
+        if (!room) return;
+        ws.send(JSON.stringify({
+          type: 'room_sync',
+          room: getRoomSnapshot(room)
+        }));
       }
 
       else if (type === 'player_move') {
@@ -453,10 +633,12 @@ wss.on('connection', (ws: WebSocket) => {
         p.weapon = data.weapon || p.weapon;
         p.lastActive = Date.now();
 
-        // Broadcast move update to opponents and teammates
+        // Broadcast move update to opponents and teammates with team & name info
         broadcastToRoom(room, {
           type: 'player_moved',
           id: p.id,
+          team: p.team,
+          name: p.name,
           x: p.x,
           y: p.y,
           z: p.z,
@@ -469,7 +651,8 @@ wss.on('connection', (ws: WebSocket) => {
       else if (type === 'player_shoot') {
         const room = rooms.get(currentRoomCode);
         if (!room) return;
-        const p = room.players.get(currentPlayerId);
+        const shooterId = data.shooterId || currentPlayerId;
+        const p = room.players.get(shooterId);
         if (!p || !p.isAlive) return;
 
         broadcastToRoom(room, {
@@ -489,7 +672,8 @@ wss.on('connection', (ws: WebSocket) => {
         const attacker = room.players.get(currentPlayerId);
         if (!target || !target.isAlive) return;
 
-        const damage = Math.max(1, data.damage || 20);
+        const rawDamage = Math.max(1, data.damage || 25);
+        const damage = Math.max(1, Math.round(rawDamage));
         const isHeadshot = !!data.isHeadshot;
         target.health = Math.max(0, target.health - damage);
 
@@ -527,11 +711,20 @@ wss.on('connection', (ws: WebSocket) => {
       else if (type === 'add_bot') {
         const room = rooms.get(currentRoomCode);
         if (!room) return;
+        const maxPerTeam = room.mode === '1v1' ? 1 : 2;
+        let redCount = 0;
+        let blueCount = 0;
+        room.players.forEach(p => { if (p.team === 'red') redCount++; else blueCount++; });
+
+        const team = data.team || (redCount <= blueCount ? 'red' : 'blue');
+        const currentTeamCount = team === 'red' ? redCount : blueCount;
+        if (currentTeamCount >= maxPerTeam) {
+          ws.send(JSON.stringify({ type: 'error', message: `Đội ${team === 'red' ? 'Đỏ' : 'Xanh'} đã đủ người chơi!` }));
+          return;
+        }
+
         const botId = 'bot_' + Math.random().toString(36).substring(2, 7);
-        const team = data.team || (Math.random() > 0.5 ? 'red' : 'blue');
-        let count = 0;
-        room.players.forEach(p => { if (p.team === team) count++; });
-        const spawn = getSpawn(team, count);
+        const spawn = getSpawn(team, currentTeamCount);
 
         const botNames = ['Shadow', 'Viper', 'Ghost', 'Raptor', 'Blaze', 'Striker', 'Titan', 'Apex'];
         const randomName = botNames[Math.floor(Math.random() * botNames.length)] + ' [BOT]';
@@ -541,7 +734,7 @@ wss.on('connection', (ws: WebSocket) => {
           name: randomName,
           roomCode: room.code,
           team,
-          slot: count,
+          slot: currentTeamCount,
           isBot: true,
           x: spawn.x,
           y: spawn.y,

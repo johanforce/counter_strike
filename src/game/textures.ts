@@ -332,40 +332,222 @@ class TextureManager {
     return new THREE.Mesh(skyGeo, skyMat);
   }
 
-  // Muzzle flash particle sprite
+  // High-fidelity Russian birch/walnut wood texture with grain
+  public getAkWoodTexture(): THREE.CanvasTexture {
+    const key = 'ak_wood';
+    if (this.textures.has(key)) return this.textures.get(key)!;
+
+    const texture = this.createPixelCanvas(256, 128, (ctx) => {
+      // Warm amber-brown wood base
+      ctx.fillStyle = '#8b4513';
+      ctx.fillRect(0, 0, 256, 128);
+
+      // Fine directional wood grain
+      for (let y = 0; y < 128; y++) {
+        const tone = Math.sin(y * 0.12) * 20 + Math.cos(y * 0.05) * 15;
+        const r = Math.min(255, Math.max(0, 139 + tone + (Math.random() - 0.5) * 15));
+        const g = Math.min(255, Math.max(0, 69 + tone * 0.6 + (Math.random() - 0.5) * 10));
+        const b = Math.min(255, Math.max(0, 19 + tone * 0.3));
+        ctx.fillStyle = `rgb(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)})`;
+        ctx.fillRect(0, y, 256, 1);
+      }
+
+      // Wavy growth rings
+      ctx.strokeStyle = 'rgba(60, 25, 5, 0.35)';
+      ctx.lineWidth = 1.5;
+      for (let i = 0; i < 6; i++) {
+        const yStart = i * 22 + 5;
+        ctx.beginPath();
+        ctx.moveTo(0, yStart);
+        ctx.bezierCurveTo(80, yStart + 8, 160, yStart - 6, 256, yStart + 4);
+        ctx.stroke();
+      }
+
+      // Specular lacquer coat sheen
+      const grad = ctx.createLinearGradient(0, 0, 0, 128);
+      grad.addColorStop(0, 'rgba(255, 220, 180, 0.15)');
+      grad.addColorStop(0.5, 'rgba(0, 0, 0, 0.08)');
+      grad.addColorStop(1, 'rgba(255, 200, 150, 0.12)');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, 256, 128);
+    });
+
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    this.textures.set(key, texture);
+    return texture;
+  }
+
+  // Blued military gunmetal with subtle brushed steel finish
+  public getGunMetalTexture(): THREE.CanvasTexture {
+    const key = 'gun_metal';
+    if (this.textures.has(key)) return this.textures.get(key)!;
+
+    const texture = this.createPixelCanvas(128, 128, (ctx) => {
+      ctx.fillStyle = '#22252a';
+      ctx.fillRect(0, 0, 128, 128);
+
+      // Fine brushed metallic streaks
+      for (let y = 0; y < 128; y += 1) {
+        const rand = (Math.random() - 0.5) * 16;
+        const v = Math.min(255, Math.max(0, 36 + rand));
+        ctx.fillStyle = `rgb(${Math.round(v)}, ${Math.round(v + 3)}, ${Math.round(v + 6)})`;
+        ctx.fillRect(0, y, 128, 1);
+      }
+
+      // Subtle edge bevel highlight
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.06)';
+      ctx.fillRect(0, 0, 128, 2);
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
+      ctx.fillRect(0, 126, 128, 2);
+    });
+
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    this.textures.set(key, texture);
+    return texture;
+  }
+
+  // Tactical checkered diamond knurling for grips
+  public getTacticalGripTexture(): THREE.CanvasTexture {
+    const key = 'tactical_grip';
+    if (this.textures.has(key)) return this.textures.get(key)!;
+
+    const texture = this.createPixelCanvas(64, 64, (ctx) => {
+      ctx.fillStyle = '#18191c';
+      ctx.fillRect(0, 0, 64, 64);
+
+      // Diamond checkered mesh
+      ctx.strokeStyle = '#2d3036';
+      ctx.lineWidth = 1;
+      for (let i = -64; i < 128; i += 6) {
+        ctx.beginPath();
+        ctx.moveTo(i, 0);
+        ctx.lineTo(i + 64, 64);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(i, 64);
+        ctx.lineTo(i + 64, 0);
+        ctx.stroke();
+      }
+    });
+
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    this.textures.set(key, texture);
+    return texture;
+  }
+
+  // Russian Laminate Amber/Birch Wood for AK-47 stock and handguards
+  public getRussianLaminateWoodTexture(): THREE.CanvasTexture {
+    const key = 'ak_laminate_wood';
+    if (this.textures.has(key)) return this.textures.get(key)!;
+
+    const texture = this.createPixelCanvas(128, 128, (ctx) => {
+      // Warm amber / mahogany base
+      ctx.fillStyle = '#682a0e';
+      ctx.fillRect(0, 0, 128, 128);
+
+      // Laminate alternating ply layers
+      for (let y = 0; y < 128; y += 4) {
+        ctx.fillStyle = (y % 8 === 0) ? '#4a1b08' : '#7b3412';
+        ctx.fillRect(0, y, 128, 3);
+      }
+
+      // Wavy organic wood grain lines
+      for (let i = 0; i < 28; i++) {
+        ctx.strokeStyle = 'rgba(30, 10, 3, 0.28)';
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        const startY = Math.random() * 128;
+        ctx.moveTo(0, startY);
+        ctx.bezierCurveTo(40, startY + (Math.random() - 0.5) * 16, 85, startY + (Math.random() - 0.5) * 16, 128, startY + (Math.random() - 0.5) * 8);
+        ctx.stroke();
+      }
+
+      // Gloss varnish highlight sheen
+      ctx.fillStyle = 'rgba(255, 210, 160, 0.08)';
+      ctx.fillRect(0, 0, 128, 6);
+      ctx.fillRect(0, 60, 128, 4);
+    });
+
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    this.textures.set(key, texture);
+    return texture;
+  }
+
+  // Tactical combat glove Kevlar fabric
+  public getGloveTexture(): THREE.CanvasTexture {
+    const key = 'tactical_glove';
+    if (this.textures.has(key)) return this.textures.get(key)!;
+
+    const texture = this.createPixelCanvas(64, 64, (ctx) => {
+      ctx.fillStyle = '#282b28';
+      ctx.fillRect(0, 0, 64, 64);
+
+      // Weave pattern
+      ctx.fillStyle = '#202220';
+      for (let x = 0; x < 64; x += 4) {
+        for (let y = 0; y < 64; y += 4) {
+          if ((x + y) % 8 === 0) {
+            ctx.fillRect(x, y, 2, 2);
+          }
+        }
+      }
+    });
+
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    this.textures.set(key, texture);
+    return texture;
+  }
+
+  // High-energy muzzle flash particle sprite
   public getMuzzleFlashSprite(): THREE.CanvasTexture {
     const key = 'muzzle_flash';
     if (this.textures.has(key)) return this.textures.get(key)!;
 
-    const texture = this.createPixelCanvas(64, 64, (ctx) => {
-      ctx.clearRect(0, 0, 64, 64);
-      // Bright yellow-orange starburst
-      const grad = ctx.createRadialGradient(32, 32, 2, 32, 32, 30);
+    const texture = this.createPixelCanvas(128, 128, (ctx) => {
+      ctx.clearRect(0, 0, 128, 128);
+
+      // Soft fiery outer corona
+      const grad = ctx.createRadialGradient(64, 64, 4, 64, 64, 62);
       grad.addColorStop(0, '#ffffff');
-      grad.addColorStop(0.2, '#fff454');
-      grad.addColorStop(0.6, '#ff8a12');
-      grad.addColorStop(1, 'rgba(255, 60, 0, 0)');
+      grad.addColorStop(0.15, '#fff688');
+      grad.addColorStop(0.35, '#ff9911');
+      grad.addColorStop(0.65, '#e63900');
+      grad.addColorStop(1, 'rgba(230, 40, 0, 0)');
 
       ctx.fillStyle = grad;
       ctx.beginPath();
-      ctx.arc(32, 32, 30, 0, Math.PI * 2);
+      ctx.arc(64, 64, 62, 0, Math.PI * 2);
       ctx.fill();
 
-      // Sharp flash spikes
-      ctx.fillStyle = '#ffffff';
-      for (let i = 0; i < 6; i++) {
-        const angle = (i * Math.PI) / 3;
+      // Brilliant 4-directional sharp flash spikes
+      const angles = [0, Math.PI / 2, Math.PI, (3 * Math.PI) / 2, Math.PI / 4, (3 * Math.PI) / 4, (5 * Math.PI) / 4, (7 * Math.PI) / 4];
+      angles.forEach((angle, idx) => {
+        const length = idx < 4 ? 60 : 42;
+        const width = idx < 4 ? 6 : 4;
         ctx.save();
-        ctx.translate(32, 32);
+        ctx.translate(64, 64);
         ctx.rotate(angle);
+        ctx.fillStyle = idx < 4 ? '#ffffff' : '#ffe177';
         ctx.beginPath();
-        ctx.moveTo(-3, 0);
-        ctx.lineTo(0, 30);
-        ctx.lineTo(3, 0);
+        ctx.moveTo(-width, 0);
+        ctx.lineTo(0, length);
+        ctx.lineTo(width, 0);
         ctx.closePath();
         ctx.fill();
         ctx.restore();
-      }
+      });
+
+      // Pure white blinding inner core
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(64, 64, 12, 0, Math.PI * 2);
+      ctx.fill();
     });
 
     this.textures.set(key, texture);

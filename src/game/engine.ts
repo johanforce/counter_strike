@@ -21,6 +21,7 @@ import { BotManager, BotInstance } from './ai';
 export interface GameEngineCallbacks {
   onHUDUpdate: (data: {
     health: number;
+    armor: number;
     ammo: number;
     reserveAmmo: number;
     weapon: WeaponType;
@@ -36,9 +37,9 @@ export interface GameEngineCallbacks {
   }) => void;
   onKillFeed: (event: KillFeedEvent) => void;
   onRadarUpdate: (data: {
-    playerPos: { x: number; z: number; rotY: number };
-    allies: { x: number; z: number }[];
-    enemies: { x: number; z: number }[];
+    playerPos: { x: number; y: number; z: number; rotY: number };
+    allies: { x: number; y: number; z: number; name?: string; rotY?: number }[];
+    enemies: { x: number; y: number; z: number; rotY?: number }[];
   }) => void;
   onRoundStatus: (status: {
     show: boolean;
@@ -46,6 +47,7 @@ export interface GameEngineCallbacks {
     message: string;
   }) => void;
   onConnectionChange: (connected: boolean) => void;
+  onRoomUpdate?: (room: any) => void;
 }
 
 export class FPSGameEngine {
@@ -65,6 +67,7 @@ export class FPSGameEngine {
   public team: Team;
   public mode: GameMode;
   public health: number = 100;
+  public armor: number = 100;
   public isAlive: boolean = true;
   public respawnTimer: number = 0;
   public currentWeapon: WeaponType = 'ak47';
@@ -81,8 +84,11 @@ export class FPSGameEngine {
   private ak47Rig: ReturnType<typeof createFirstPersonAK47>;
   private pistolRig: ReturnType<typeof createFirstPersonPistol>;
   private knifeRig: ReturnType<typeof createFirstPersonKnife>;
+  private muzzleFlashGroup: THREE.Group;
   private muzzleFlashSprite: THREE.Sprite;
   private muzzleFlashLight: THREE.PointLight;
+  private gunKickZ: number = 0;
+  private gunKickRotX: number = 0;
 
   // Knife Combat Visuals
   private knifeSwingTime: number = 0;
@@ -93,8 +99,12 @@ export class FPSGameEngine {
   private playerVelocity = new THREE.Vector3();
   private yaw: number = 0;
   private pitch: number = 0;
+  private cameraRoll: number = 0;
+  private currentEyeHeight: number = 1.6;
   private isGrounded: boolean = false;
   private isCrouching: boolean = false;
+  private isWalking: boolean = false;
+  private jumpBufferTimer: number = 0;
   private isPointerLocked: boolean = false;
 
   // Input states (Robust multi-keyboard & IME support)
@@ -126,7 +136,7 @@ export class FPSGameEngine {
   }> = new Map();
 
   // Decals & Effects
-  private bulletTracers: { line: THREE.Line; expire: number }[] = [];
+  private bulletTracers: { obj: THREE.Object3D; expire: number }[] = [];
   private bulletDecals: THREE.Mesh[] = [];
   private knifeScratchDecals: THREE.Mesh[] = [];
   private particles: { mesh: THREE.Points; velocities: THREE.Vector3[]; expire: number }[] = [];
@@ -141,8 +151,12 @@ export class FPSGameEngine {
   // Network WebSocket
   private ws: WebSocket | null = null;
   private lastNetSend: number = 0;
+  private lastBotNetSend: number = 0;
   private isOnlineMode: boolean = false;
   private roomCode: string = '';
+  public isHost: boolean = false;
+  public slot: number = 0;
+  private cachedPlayers: Map<string, { name: string; team: Team; isBot: boolean }> = new Map();
 
   // Animation Loop
   private animFrameId: number = 0;
@@ -162,6 +176,8 @@ export class FPSGameEngine {
       botDifficulty?: 'easy' | 'normal' | 'hard';
       existingWs?: WebSocket;
       localPlayerId?: string;
+      initialRoomState?: any;
+      isHost?: boolean;
     }
   ) {
     this.container = container;
@@ -171,8 +187,23 @@ export class FPSGameEngine {
     this.team = options.team;
     this.mode = options.mode;
     this.isOnlineMode = options.isOnline;
+    this.isHost = !!options.isHost;
     this.roomCode = options.roomCode || 'SOLO_' + Math.random().toString(36).substring(2, 6).toUpperCase();
     this.localPlayerId = options.localPlayerId || ('player_' + Math.random().toString(36).substring(2, 9));
+
+    // Cache initial room players if available
+    if (options.initialRoomState?.players) {
+      options.initialRoomState.players.forEach((p: any) => {
+        this.cachedPlayers.set(p.id, { name: p.name, team: p.team, isBot: !!p.isBot });
+      });
+
+      // Synchronize authoritative local player team & slot from room state
+      const me = options.initialRoomState.players.find((p: any) => p.id === this.localPlayerId);
+      if (me) {
+        this.team = me.team;
+        this.slot = me.slot || 0;
+      }
+    }
 
     // 1. Scene & Renderer
     this.scene = new THREE.Scene();
@@ -220,7 +251,8 @@ export class FPSGameEngine {
     this.scene.add(this.mapData.sceneGroup);
 
     // Set initial spawn
-    const mySpawn = this.mapData.spawns[this.team][0];
+    const spawnList = this.mapData.spawns[this.team];
+    const mySpawn = spawnList[this.slot % spawnList.length] || spawnList[0];
     this.playerPos.set(mySpawn.x, mySpawn.y, mySpawn.z);
     this.yaw = mySpawn.rotY;
 
@@ -230,30 +262,41 @@ export class FPSGameEngine {
     this.scene.add(this.camera);
 
     this.ak47Rig = createFirstPersonAK47();
-    this.ak47Rig.group.position.set(0.24, -0.22, -0.45);
+    this.ak47Rig.group.position.set(0.22, -0.21, -0.42);
+    this.ak47Rig.group.rotation.set(0.01, -0.012, 0); // Sight convergence towards crosshairs
     this.ak47Rig.group.visible = false;
     this.fpCameraRig.add(this.ak47Rig.group);
 
     this.pistolRig = createFirstPersonPistol();
-    this.pistolRig.group.position.set(0.22, -0.2, -0.4);
+    this.pistolRig.group.position.set(0.20, -0.19, -0.38);
+    this.pistolRig.group.rotation.set(0.012, -0.012, 0); // Sight convergence towards crosshairs
     this.pistolRig.group.visible = false;
     this.fpCameraRig.add(this.pistolRig.group);
 
     this.knifeRig = createFirstPersonKnife();
-    this.knifeRig.group.position.set(0.25, -0.24, -0.42);
+    this.knifeRig.group.position.set(0.24, -0.23, -0.40);
     this.knifeRig.group.visible = false;
     this.fpCameraRig.add(this.knifeRig.group);
 
-    // Muzzle flash particle sprite for firearms
+    // Muzzle Flash Group - attached directly to the active gun's muzzlePoint!
+    this.muzzleFlashGroup = new THREE.Group();
     const flashTex = textures.getMuzzleFlashSprite();
-    const flashMat = new THREE.SpriteMaterial({ map: flashTex, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false });
+    const flashMat = new THREE.SpriteMaterial({
+      map: flashTex,
+      blending: THREE.AdditiveBlending,
+      transparent: true,
+      depthWrite: false
+    });
     this.muzzleFlashSprite = new THREE.Sprite(flashMat);
-    this.muzzleFlashSprite.scale.set(0.35, 0.35, 0.35);
-    this.muzzleFlashSprite.visible = false;
-    this.fpCameraRig.add(this.muzzleFlashSprite);
+    this.muzzleFlashSprite.scale.set(0.32, 0.32, 0.32);
+    this.muzzleFlashGroup.add(this.muzzleFlashSprite);
 
     this.muzzleFlashLight = new THREE.PointLight(0xffaa22, 0, 8);
-    this.fpCameraRig.add(this.muzzleFlashLight);
+    this.muzzleFlashGroup.add(this.muzzleFlashLight);
+    this.muzzleFlashGroup.visible = false;
+
+    // Attach muzzle flash to AK47 muzzle by default
+    this.ak47Rig.muzzlePoint.add(this.muzzleFlashGroup);
 
     // Force set weapon to AK47 and ensure ONLY AK47 is visible
     this.setWeapon('ak47', true);
@@ -267,10 +310,32 @@ export class FPSGameEngine {
       (bot, victimId, isHeadshot) => this.handleBotKill(bot, victimId, isHeadshot)
     );
 
-    // Populate Bots if offline or needed
+    // Populate Bots & Remote Players
     if (!this.isOnlineMode) {
       this.setupOfflineMatch(options.botDifficulty || 'normal');
     } else {
+      // 1. If we are host, add all bots in room to botManager to simulate them
+      if (this.isHost && options.initialRoomState?.players) {
+        options.initialRoomState.players.forEach((p: any) => {
+          if (p.isBot) {
+            const botSpawn = { x: p.x, y: p.y, z: p.z, rotY: p.rotY };
+            this.botManager.addBot(p.id, p.name, p.team, botSpawn, options.botDifficulty || 'normal');
+          }
+        });
+      }
+
+      // 2. Add all existing remote players into remotePlayers map
+      if (options.initialRoomState?.players) {
+        options.initialRoomState.players.forEach((p: any) => {
+          if (p.id !== this.localPlayerId) {
+            // Only add if not a bot already managed locally by host
+            if (!(this.isHost && p.isBot)) {
+              this.upsertRemotePlayer(p);
+            }
+          }
+        });
+      }
+
       if (options.existingWs) {
         this.ws = options.existingWs;
         this.attachWebSocketListeners();
@@ -331,6 +396,20 @@ export class FPSGameEngine {
     this.ws.onerror = (err) => {
       console.warn('[WS] Error:', err);
     };
+
+    // Request immediate room snapshot and broadcast initial spawn position
+    if (this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: 'request_sync' }));
+      this.ws.send(JSON.stringify({
+        type: 'player_move',
+        x: this.playerPos.x,
+        y: this.playerPos.y,
+        z: this.playerPos.z,
+        rotY: this.yaw,
+        pitch: this.pitch,
+        weapon: this.currentWeapon
+      }));
+    }
   }
 
   private initWebSocket() {
@@ -369,6 +448,9 @@ export class FPSGameEngine {
     player?: any;
     room?: any;
     id?: string;
+    playerId?: string;
+    team?: Team;
+    name?: string;
     x?: number;
     y?: number;
     z?: number;
@@ -380,6 +462,7 @@ export class FPSGameEngine {
     direction?: { x: number; y: number; z: number };
     damage?: number;
     targetId?: string;
+    attackerId?: string;
     isHeadshot?: boolean;
     killerId?: string;
     killerName?: string;
@@ -390,24 +473,62 @@ export class FPSGameEngine {
     winner?: Team | 'draw';
     reason?: string;
   }) {
-    if (msg.type === 'joined_room' || msg.type === 'player_joined') {
+    if (msg.type === 'room_sync' || msg.type === 'joined_room' || msg.type === 'player_joined' || msg.type === 'player_updated') {
       if (msg.room) {
+        this.callbacks.onRoomUpdate?.(msg.room);
         this.redScore = msg.room.redScore;
         this.blueScore = msg.room.blueScore;
         this.currentRound = msg.room.round;
         this.roundTimeLeft = msg.room.roundTimeLeft;
 
+        // Check if we became room host
+        if (msg.room.hostId === this.localPlayerId) {
+          this.isHost = true;
+        }
+
         msg.room.players.forEach((p: any) => {
-          if (p.id !== this.localPlayerId) {
+          this.cachedPlayers.set(p.id, { name: p.name, team: p.team, isBot: !!p.isBot });
+
+          if (p.id === this.localPlayerId) {
+            this.team = p.team;
+          } else if (this.isHost && p.isBot) {
+            // Host actively simulates this bot
+            if (!this.botManager.getBot(p.id)) {
+              this.botManager.addBot(p.id, p.name, p.team, { x: p.x, y: p.y, z: p.z, rotY: p.rotY }, 'normal');
+            }
+          } else {
             this.upsertRemotePlayer(p);
           }
         });
       }
     } else if (msg.type === 'player_moved' && msg.id && msg.id !== this.localPlayerId) {
-      const rp = this.remotePlayers.get(msg.id);
+      if (this.isHost && this.botManager.getBot(msg.id)) {
+        return; // Host already controls this bot
+      }
+
+      let rp = this.remotePlayers.get(msg.id);
+      if (!rp) {
+        // Auto-instantiate remote player if not present yet
+        const cached = this.cachedPlayers.get(msg.id);
+        const pTeam = cached?.team || (msg.team as Team) || (this.team === 'red' ? 'blue' : 'red');
+        const pName = cached?.name || (msg.name as string) || 'Chiến Binh';
+        this.upsertRemotePlayer({
+          id: msg.id,
+          team: pTeam,
+          name: pName,
+          x: msg.x ?? 0,
+          y: msg.y ?? 1.6,
+          z: msg.z ?? 0,
+          rotY: msg.rotY ?? 0,
+          health: 100,
+          weapon: msg.weapon || 'ak47'
+        });
+        rp = this.remotePlayers.get(msg.id);
+      }
+
       if (rp) {
-        rp.targetPos.set(msg.x || 0, (msg.y || 0) - 1.6, msg.z || 0);
-        rp.rotY = msg.rotY || 0;
+        rp.targetPos.set(msg.x ?? rp.targetPos.x, (msg.y ?? 1.6) - 1.6, msg.z ?? rp.targetPos.z);
+        if (msg.rotY !== undefined) rp.rotY = msg.rotY;
         if (msg.weapon && msg.weapon !== rp.weapon) {
           rp.weapon = msg.weapon;
           rp.meshData.updateWeapon(msg.weapon);
@@ -426,20 +547,25 @@ export class FPSGameEngine {
       }
     } else if (msg.type === 'player_damaged') {
       if (msg.targetId === this.localPlayerId) {
-        this.takeDamage(msg.damage || 20, false, 'Remote');
+        this.takeDamage(msg.damage || 25, !!msg.isHeadshot, 'Đối thủ');
+      } else if (this.isHost && msg.targetId && this.botManager.getBot(msg.targetId)) {
+        this.botManager.applyDamage(msg.targetId, msg.damage || 25, !!msg.isHeadshot, msg.attackerId || 'unknown');
       } else {
         const rp = this.remotePlayers.get(msg.targetId || '');
         if (rp) {
-          rp.health = msg.damage ? Math.max(0, rp.health - msg.damage) : 100;
+          rp.health = msg.damage !== undefined ? Math.max(0, rp.health - msg.damage) : 0;
           rp.meshData.updateHealthTag(rp.health);
+          if (rp.health <= 0) {
+            rp.meshData.mesh.visible = false;
+          }
         }
       }
     } else if (msg.type === 'player_killed') {
       this.callbacks.onKillFeed({
         id: 'kf_' + Math.random(),
-        killerName: msg.killerName || 'Unknown',
+        killerName: msg.killerName || 'Vô danh',
         killerTeam: msg.killerTeam || 'red',
-        victimName: msg.victimName || 'Unknown',
+        victimName: msg.victimName || 'Vô danh',
         victimTeam: msg.victimTeam || 'blue',
         weapon: msg.weapon || 'ak47',
         isHeadshot: !!msg.isHeadshot,
@@ -448,10 +574,53 @@ export class FPSGameEngine {
 
       if (msg.victimId === this.localPlayerId) {
         this.handlePlayerDeath(msg.killerName || 'Đối thủ');
+      } else if (this.isHost && msg.victimId && this.botManager.getBot(msg.victimId)) {
+        this.botManager.applyDamage(msg.victimId, 999, !!msg.isHeadshot, msg.killerId || 'unknown');
+      } else {
+        const rp = this.remotePlayers.get(msg.victimId || '');
+        if (rp) {
+          rp.health = 0;
+          rp.meshData.updateHealthTag(0);
+          rp.meshData.mesh.visible = false;
+        }
       }
     } else if (msg.type === 'round_started') {
       this.roundEnded = false;
       this.respawnLocalPlayer();
+
+      if (msg.room) {
+        this.callbacks.onRoomUpdate?.(msg.room);
+        this.redScore = msg.room.redScore;
+        this.blueScore = msg.room.blueScore;
+        this.currentRound = msg.room.round;
+        this.roundTimeLeft = msg.room.roundTimeLeft;
+
+        msg.room.players.forEach((p: any) => {
+          if (p.id !== this.localPlayerId) {
+            if (this.isHost && p.isBot) {
+              const b = this.botManager.getBot(p.id);
+              if (b) {
+                b.position.set(p.x, p.y, p.z);
+                b.health = 100;
+                b.isAlive = true;
+                b.meshData.mesh.visible = true;
+                b.meshData.updateHealthTag(100);
+              }
+            } else {
+              this.upsertRemotePlayer(p);
+              const rp = this.remotePlayers.get(p.id);
+              if (rp) {
+                rp.health = 100;
+                rp.meshData.mesh.visible = true;
+                rp.meshData.updateHealthTag(100);
+                rp.position.set(p.x, p.y - 1.6, p.z);
+                rp.targetPos.set(p.x, p.y - 1.6, p.z);
+              }
+            }
+          }
+        });
+      }
+
       this.callbacks.onRoundStatus({ show: false, message: '' });
       sounds.playRoundStart();
     } else if (msg.type === 'round_ended') {
@@ -465,6 +634,13 @@ export class FPSGameEngine {
         winner: msg.winner,
         message: msg.reason || (won ? 'CHIẾN THẮNG!' : 'THẤT BẠI!')
       });
+    } else if (msg.type === 'player_left' && msg.playerId) {
+      const rp = this.remotePlayers.get(msg.playerId);
+      if (rp) {
+        this.scene.remove(rp.meshData.mesh);
+        this.remotePlayers.delete(msg.playerId);
+      }
+      this.cachedPlayers.delete(msg.playerId);
     }
   }
 
@@ -472,24 +648,38 @@ export class FPSGameEngine {
     let rp = this.remotePlayers.get(p.id);
     if (!rp) {
       const meshData = createPlayerMesh(p.team, p.name);
+      // Tag hitboxes with playerId and remote status for bullet raycasts
+      meshData.headMesh.userData = { hitbox: 'head', playerId: p.id, isRemote: true };
+      meshData.bodyMesh.userData = { hitbox: 'body', playerId: p.id, isRemote: true };
+      meshData.legsMesh.children.forEach(l => {
+        l.userData = { hitbox: 'legs', playerId: p.id, isRemote: true };
+      });
+
       this.scene.add(meshData.mesh);
       rp = {
         meshData,
-        position: new THREE.Vector3(p.x, p.y - 1.6, p.z),
-        targetPos: new THREE.Vector3(p.x, p.y - 1.6, p.z),
-        rotY: p.rotY,
+        position: new THREE.Vector3(p.x ?? 0, (p.y ?? 1.6) - 1.6, p.z ?? 0),
+        targetPos: new THREE.Vector3(p.x ?? 0, (p.y ?? 1.6) - 1.6, p.z ?? 0),
+        rotY: p.rotY ?? 0,
         team: p.team,
         name: p.name,
-        health: p.health,
-        weapon: p.weapon
+        health: p.health ?? 100,
+        weapon: p.weapon || 'ak47'
       };
       this.remotePlayers.set(p.id, rp);
     }
-    rp.targetPos.set(p.x, p.y - 1.6, p.z);
-    rp.rotY = p.rotY;
-    rp.health = p.health;
-    rp.meshData.updateHealthTag(p.health);
-    rp.meshData.updateWeapon(p.weapon);
+
+    rp.targetPos.set(p.x ?? rp.targetPos.x, (p.y ?? 1.6) - 1.6, p.z ?? rp.targetPos.z);
+    if (p.rotY !== undefined) rp.rotY = p.rotY;
+    if (p.health !== undefined) {
+      rp.health = p.health;
+      rp.meshData.updateHealthTag(p.health);
+      rp.meshData.mesh.visible = p.health > 0;
+    }
+    if (p.weapon) {
+      rp.weapon = p.weapon;
+      rp.meshData.updateWeapon(p.weapon);
+    }
   }
 
   // Setup Key and Mouse Listeners (Supporting Vietnamese keyboard/IME layout & direct hold)
@@ -527,10 +717,19 @@ export class FPSGameEngine {
         this.reloadWeapon();
       }
 
-      // Jump
-      if (e.code === 'Space' && this.isGrounded && this.isAlive) {
-        this.playerVelocity.y = 6.8;
-        this.isGrounded = false;
+      // Jump (with buffer for responsive timing)
+      if (e.code === 'Space' && this.isAlive) {
+        this.jumpBufferTimer = 0.15;
+        if (this.isGrounded) {
+          this.playerVelocity.y = 6.4;
+          this.isGrounded = false;
+          this.jumpBufferTimer = 0;
+        }
+      }
+
+      // Tactical Walk (Shift)
+      if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') {
+        this.isWalking = true;
       }
 
       // Crouch
@@ -544,6 +743,10 @@ export class FPSGameEngine {
       if (isBackward(e)) { this.moveBackward = false; }
       if (isLeft(e)) { this.moveLeft = false; }
       if (isRight(e)) { this.moveRight = false; }
+
+      if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') {
+        this.isWalking = false;
+      }
 
       if (e.code === 'KeyC' || e.code === 'ControlLeft' || (e.key && e.key.toLowerCase() === 'c')) {
         this.isCrouching = false;
@@ -609,6 +812,7 @@ export class FPSGameEngine {
       this.moveLeft = false;
       this.moveRight = false;
       this.isCrouching = false;
+      this.isWalking = false;
       this.isFiring = false;
       this.isMouseDown = false;
     };
@@ -626,6 +830,7 @@ export class FPSGameEngine {
       this.isPointerLocked = document.pointerLockElement === this.container;
       this.callbacks.onHUDUpdate({
         health: this.health,
+        armor: this.armor,
         ammo: this.ammoState[this.currentWeapon].mag,
         reserveAmmo: this.ammoState[this.currentWeapon].reserve,
         weapon: this.currentWeapon,
@@ -667,6 +872,13 @@ export class FPSGameEngine {
     this.ak47Rig.group.visible = weapon === 'ak47';
     this.pistolRig.group.visible = weapon === 'pistol';
     this.knifeRig.group.visible = weapon === 'knife';
+
+    // Move muzzle flash group to the active weapon's muzzle point
+    if (weapon === 'ak47') {
+      this.ak47Rig.muzzlePoint.add(this.muzzleFlashGroup);
+    } else if (weapon === 'pistol') {
+      this.pistolRig.muzzlePoint.add(this.muzzleFlashGroup);
+    }
 
     // Quick draw recoil kick
     this.recoilPitch = 0.04;
@@ -720,14 +932,16 @@ export class FPSGameEngine {
 
     // Broadcast shoot to WS
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      const eyePos = this.camera.position;
+      const activeRig = this.currentWeapon === 'ak47' ? this.ak47Rig : this.pistolRig;
+      const muzzleWorld = new THREE.Vector3();
+      activeRig.muzzlePoint.getWorldPosition(muzzleWorld);
       const dir = new THREE.Vector3();
       this.camera.getWorldDirection(dir);
 
       this.ws.send(JSON.stringify({
         type: 'player_shoot',
         weapon: this.currentWeapon,
-        origin: { x: eyePos.x, y: eyePos.y, z: eyePos.z },
+        origin: { x: muzzleWorld.x, y: muzzleWorld.y, z: muzzleWorld.z },
         direction: { x: dir.x, y: dir.y, z: dir.z }
       }));
     }
@@ -789,6 +1003,7 @@ export class FPSGameEngine {
         // Flash Hitmarker
         this.callbacks.onHUDUpdate({
           health: this.health,
+          armor: this.armor,
           ammo: 1,
           reserveAmmo: 0,
           weapon: 'knife',
@@ -803,12 +1018,12 @@ export class FPSGameEngine {
           respawnTimer: this.respawnTimer
         });
 
-        // Apply damage to bot
-        const botId = hitObj.userData?.playerId;
-        if (botId && this.botManager.getBot(botId)) {
-          const killed = this.botManager.applyDamage(botId, damage, isHead, this.localPlayerId);
+        // Apply damage to bot or remote player
+        const hitPlayerId = hitObj.userData?.playerId;
+        if (hitPlayerId && this.botManager.getBot(hitPlayerId)) {
+          const killed = this.botManager.applyDamage(hitPlayerId, damage, isHead, this.localPlayerId);
           if (killed) {
-            const bot = this.botManager.getBot(botId)!;
+            const bot = this.botManager.getBot(hitPlayerId)!;
             this.callbacks.onKillFeed({
               id: 'kf_' + Math.random(),
               killerName: this.playerName,
@@ -819,7 +1034,22 @@ export class FPSGameEngine {
               isHeadshot: isHead,
               timestamp: Date.now()
             });
-            this.checkOfflineRoundWin();
+            if (!this.isOnlineMode) {
+              this.checkOfflineRoundWin();
+            }
+          }
+        } else if (hitPlayerId && this.remotePlayers.has(hitPlayerId)) {
+          const rp = this.remotePlayers.get(hitPlayerId)!;
+          if (rp.team !== this.team && rp.health > 0) {
+            if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+              this.ws.send(JSON.stringify({
+                type: 'hit_damage',
+                targetId: hitPlayerId,
+                damage,
+                isHeadshot: isHead,
+                weapon: 'knife'
+              }));
+            }
           }
         }
       } else {
@@ -834,18 +1064,30 @@ export class FPSGameEngine {
   private triggerMuzzleFlash() {
     if (this.currentWeapon === 'knife') return;
 
-    let muzzleOffset = new THREE.Vector3(0.24, -0.2, -0.8);
+    const activeRig = this.currentWeapon === 'ak47' ? this.ak47Rig : this.pistolRig;
+    activeRig.muzzlePoint.add(this.muzzleFlashGroup);
+
+    // Dynamic rotation and scale variation for realistic gunfire sparks
+    const scale = this.currentWeapon === 'ak47' ? 0.32 + Math.random() * 0.08 : 0.22 + Math.random() * 0.06;
+    this.muzzleFlashSprite.scale.set(scale, scale, scale);
+    this.muzzleFlashSprite.material.rotation = Math.random() * Math.PI * 2;
+
+    this.muzzleFlashGroup.position.set(0, 0, 0);
+    this.muzzleFlashGroup.visible = true;
+    this.muzzleFlashLight.intensity = 3.5;
+
+    // Viewmodel kickback recoil & mechanism cycling
+    this.gunKickZ = this.currentWeapon === 'ak47' ? 0.035 : 0.025;
+    this.gunKickRotX = this.currentWeapon === 'ak47' ? 0.03 : 0.04;
+
     if (this.currentWeapon === 'pistol') {
-      muzzleOffset.set(0.22, -0.17, -0.5);
+      this.pistolRig.slideMesh.position.z += 0.045;
+    } else if (this.currentWeapon === 'ak47') {
+      this.ak47Rig.boltMesh.position.z += 0.035;
     }
 
-    this.muzzleFlashSprite.position.copy(muzzleOffset);
-    this.muzzleFlashSprite.visible = true;
-    this.muzzleFlashLight.position.copy(muzzleOffset);
-    this.muzzleFlashLight.intensity = 2.5;
-
     setTimeout(() => {
-      this.muzzleFlashSprite.visible = false;
+      this.muzzleFlashGroup.visible = false;
       this.muzzleFlashLight.intensity = 0;
     }, 45);
   }
@@ -887,12 +1129,10 @@ export class FPSGameEngine {
 
     const intersects = raycaster.intersectObjects(hitCandidates, true);
 
+    // EXACT 3D world position of the tip of the gun barrel
+    const activeRig = this.currentWeapon === 'ak47' ? this.ak47Rig : this.pistolRig;
     const muzzleWorld = new THREE.Vector3();
-    this.camera.getWorldPosition(muzzleWorld);
-    const cameraDir = new THREE.Vector3();
-    this.camera.getWorldDirection(cameraDir);
-    muzzleWorld.add(cameraDir.clone().multiplyScalar(0.4));
-    muzzleWorld.add(new THREE.Vector3(0.18, -0.15, 0));
+    activeRig.muzzlePoint.getWorldPosition(muzzleWorld);
 
     if (intersects.length > 0) {
       const hit = intersects[0];
@@ -913,6 +1153,7 @@ export class FPSGameEngine {
         // Flash Hitmarker on HUD
         this.callbacks.onHUDUpdate({
           health: this.health,
+          armor: this.armor,
           ammo: this.ammoState[this.currentWeapon].mag,
           reserveAmmo: this.ammoState[this.currentWeapon].reserve,
           weapon: this.currentWeapon,
@@ -927,12 +1168,12 @@ export class FPSGameEngine {
           respawnTimer: this.respawnTimer
         });
 
-        // Apply to Bot
-        const botId = hitObj.userData?.playerId;
-        if (botId && this.botManager.getBot(botId)) {
-          const killed = this.botManager.applyDamage(botId, damage, isHeadshot, this.localPlayerId);
+        // Apply to Bot or Remote Player
+        const hitPlayerId = hitObj.userData?.playerId;
+        if (hitPlayerId && this.botManager.getBot(hitPlayerId)) {
+          const killed = this.botManager.applyDamage(hitPlayerId, damage, isHeadshot, this.localPlayerId);
           if (killed) {
-            const bot = this.botManager.getBot(botId)!;
+            const bot = this.botManager.getBot(hitPlayerId)!;
             this.callbacks.onKillFeed({
               id: 'kf_' + Math.random(),
               killerName: this.playerName,
@@ -944,34 +1185,77 @@ export class FPSGameEngine {
               timestamp: Date.now()
             });
 
-            this.checkOfflineRoundWin();
+            if (!this.isOnlineMode) {
+              this.checkOfflineRoundWin();
+            }
+          }
+        } else if (hitPlayerId && this.remotePlayers.has(hitPlayerId)) {
+          const rp = this.remotePlayers.get(hitPlayerId)!;
+          if (rp.team !== this.team && rp.health > 0) {
+            if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+              this.ws.send(JSON.stringify({
+                type: 'hit_damage',
+                targetId: hitPlayerId,
+                damage,
+                isHeadshot,
+                weapon: this.currentWeapon
+              }));
+            }
           }
         }
       } else {
-        // Hit wall / obstacle: place bullet hole decal
+        // Hit wall / obstacle: place bullet hole decal and sparks
         if (hit.face) {
           this.createBulletHole(hit.point, hit.face.normal);
+          this.createSparkParticles(hit.point);
         }
       }
     } else {
-      // Missed into distance: tracer extends to max range
-      const endPoint = muzzleWorld.clone().add(cameraDir.clone().multiplyScalar(60));
-      this.createBulletTracer(muzzleWorld, endPoint, 60);
+      // Missed into distance: tracer extends along ray direction from muzzle
+      const rayDir = raycaster.ray.direction;
+      const endPoint = this.camera.position.clone().add(rayDir.clone().multiplyScalar(75));
+      this.createBulletTracer(muzzleWorld, endPoint, 75);
     }
   }
 
   private createBulletTracer(from: THREE.Vector3, to: THREE.Vector3, _dist: number) {
+    const group = new THREE.Group();
+
+    // 1. High-intensity neon tracer core line
     const points = [from, to];
-    const geo = new THREE.BufferGeometry().setFromPoints(points);
-    const mat = new THREE.LineBasicMaterial({
-      color: 0xffea88,
-      linewidth: 2,
+    const lineGeo = new THREE.BufferGeometry().setFromPoints(points);
+    const lineMat = new THREE.LineBasicMaterial({
+      color: 0xfff4b0,
+      linewidth: 3,
       transparent: true,
-      opacity: 0.8
+      opacity: 0.95
     });
-    const line = new THREE.Line(geo, mat);
-    this.scene.add(line);
-    this.bulletTracers.push({ line, expire: performance.now() + 65 });
+    const line = new THREE.Line(lineGeo, lineMat);
+    group.add(line);
+
+    // 2. Volumetric Glowing Tracer Beam Cylinder (visible in 3D from all angles)
+    const dir = to.clone().sub(from);
+    const length = dir.length();
+    if (length > 0.1) {
+      const cylinderGeo = new THREE.CylinderGeometry(0.016, 0.016, length, 8);
+      cylinderGeo.rotateX(Math.PI / 2);
+      cylinderGeo.translate(0, 0, length / 2);
+
+      const cylinderMat = new THREE.MeshBasicMaterial({
+        color: 0xffaa22,
+        transparent: true,
+        opacity: 0.65,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
+      });
+      const cylinderMesh = new THREE.Mesh(cylinderGeo, cylinderMat);
+      cylinderMesh.position.copy(from);
+      cylinderMesh.lookAt(to);
+      group.add(cylinderMesh);
+    }
+
+    this.scene.add(group);
+    this.bulletTracers.push({ obj: group, expire: performance.now() + 75 });
   }
 
   private createBulletHole(pos: THREE.Vector3, normal: THREE.Vector3) {
@@ -1084,7 +1368,18 @@ export class FPSGameEngine {
     const end = origin.clone().add(dir.clone().multiplyScalar(40));
     this.createBulletTracer(origin, end, 40);
 
-    // Check if hit player
+    // If online and host, broadcast bot firing across network
+    if (this.isOnlineMode && this.isHost && this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({
+        type: 'player_shoot',
+        shooterId: bot.id,
+        weapon: bot.weapon,
+        origin: { x: origin.x, y: origin.y, z: origin.z },
+        direction: { x: dir.x, y: dir.y, z: dir.z }
+      }));
+    }
+
+    // Check if hit local player
     const eyePos = this.playerPos.clone();
     const toPlayer = eyePos.clone().sub(origin);
     const proj = toPlayer.dot(dir);
@@ -1094,11 +1389,11 @@ export class FPSGameEngine {
       const dist = closestPoint.distanceTo(eyePos);
 
       // Hitbox cylinder check
-      if (dist < 0.65 && this.isAlive) {
+      if (dist < 0.65 && this.isAlive && bot.team !== this.team) {
         const isHead = closestPoint.y > eyePos.y - 0.2;
         const wData = WEAPONS[bot.weapon];
-        const mult = isHead ? wData.headshotMultiplier : 1.0;
-        const dmg = Math.round(wData.damage * mult * 0.85); // bot balance
+        const mult = isHead ? 1.4 : 1.0;
+        const dmg = Math.round(wData.damage * mult * 0.42); // Balanced bot damage (reduced by ~58%)
         this.takeDamage(dmg, isHead, bot.name);
 
         if (this.health <= 0) {
@@ -1115,6 +1410,31 @@ export class FPSGameEngine {
           this.handlePlayerDeath(bot.name);
         }
       }
+    }
+
+    // If online and host, check if bot shot any remote opponents
+    if (this.isOnlineMode && this.isHost && this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.remotePlayers.forEach(rp => {
+        if (rp.team !== bot.team && rp.health > 0) {
+          const rpPos = rp.position.clone().add(new THREE.Vector3(0, 1.4, 0));
+          const toTarget = rpPos.clone().sub(origin);
+          const p = toTarget.dot(dir);
+          if (p > 0 && p < 45) {
+            const closest = origin.clone().add(dir.clone().multiplyScalar(p));
+            if (closest.distanceTo(rpPos) < 0.65) {
+              const isHead = closest.y > rpPos.y - 0.2;
+              const dmg = Math.round(WEAPONS[bot.weapon].damage * (isHead ? 1.4 : 1.0) * 0.42);
+              this.ws?.send(JSON.stringify({
+                type: 'hit_damage',
+                targetId: rp.meshData.headMesh.userData?.playerId || rp.meshData.mesh.userData?.playerId,
+                damage: dmg,
+                isHeadshot: isHead,
+                weapon: bot.weapon
+              }));
+            }
+          }
+        }
+      });
     }
   }
 
@@ -1138,12 +1458,24 @@ export class FPSGameEngine {
   public takeDamage(amount: number, _isHeadshot: boolean, _attackerName: string) {
     if (!this.isAlive) return;
 
-    this.health = Math.max(0, this.health - amount);
+    // 50% damage reduction for longer tactical gunfights and survivability
+    const mitigatedDamage = Math.max(1, Math.round(amount * 0.5));
+
+    // CS:GO Kevlar Armor absorption: absorbs 50% of the damage
+    if (this.armor > 0) {
+      const armorAbsorb = Math.min(this.armor, Math.ceil(mitigatedDamage * 0.5));
+      const healthDamage = mitigatedDamage - armorAbsorb;
+      this.armor = Math.max(0, this.armor - armorAbsorb);
+      this.health = Math.max(0, this.health - healthDamage);
+    } else {
+      this.health = Math.max(0, this.health - mitigatedDamage);
+    }
+
     sounds.playPlayerHurt();
 
-    // Camera flinch
-    this.pitch += 0.04;
-    this.yaw += (Math.random() - 0.5) * 0.05;
+    // Camera flinch (moderate so aiming is not completely ruined)
+    this.pitch += 0.025;
+    this.yaw += (Math.random() - 0.5) * 0.03;
 
     if (this.health === 0) {
       this.handlePlayerDeath(_attackerName);
@@ -1164,12 +1496,14 @@ export class FPSGameEngine {
 
   private respawnLocalPlayer() {
     this.health = 100;
+    this.armor = 100;
     this.isAlive = true;
     this.respawnTimer = 0;
     this.ammoState.ak47.mag = 30;
     this.ammoState.pistol.mag = 12;
 
-    const mySpawn = this.mapData.spawns[this.team][0];
+    const spawnList = this.mapData.spawns[this.team];
+    const mySpawn = spawnList[this.slot % spawnList.length] || spawnList[0];
     this.playerPos.set(mySpawn.x, mySpawn.y, mySpawn.z);
     this.yaw = mySpawn.rotY;
     this.pitch = 0;
@@ -1230,59 +1564,106 @@ export class FPSGameEngine {
     }, 4000);
   }
 
-  // Physics & Collision Update (Smooth sliding AABB, NO trapping or getting stuck)
+  // Physics & Collision Update (Ultra-smooth FPS movement, auto-step climbing & fluid air control)
   private updatePhysics(delta: number) {
     if (!this.isAlive) return;
 
-    // Camera look vectors
+    // 1. Smooth crouch eye-height transition
+    const targetEyeHeight = this.isCrouching ? 1.05 : 1.6;
+    this.currentEyeHeight = THREE.MathUtils.lerp(this.currentEyeHeight, targetEyeHeight, Math.min(1, delta * 14));
+    const eyeHeight = this.currentEyeHeight;
+
+    // 2. Camera look vectors
     const forward = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
     const right = new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
 
-    // Desired move direction using direct input flags
-    const moveDir = new THREE.Vector3();
-    if (this.moveForward) moveDir.add(forward);
-    if (this.moveBackward) moveDir.sub(forward);
-    if (this.moveRight) moveDir.add(right);
-    if (this.moveLeft) moveDir.sub(right);
+    // 3. Desired move direction
+    const wishDir = new THREE.Vector3();
+    if (this.moveForward) wishDir.add(forward);
+    if (this.moveBackward) wishDir.sub(forward);
+    if (this.moveRight) wishDir.add(right);
+    if (this.moveLeft) wishDir.sub(right);
 
-    const isMoving = moveDir.lengthSq() > 0.001;
+    const isMoving = wishDir.lengthSq() > 0.001;
     if (isMoving) {
-      moveDir.normalize();
+      wishDir.normalize();
     }
 
-    const baseSpeed = this.isCrouching ? 3.0 : 6.5;
-    const accel = this.isGrounded ? 45 : 16;
+    // 4. Dynamic speeds
+    let wishSpeed = 6.8; // m/s
+    if (this.isCrouching) wishSpeed = 3.2;
+    else if (this.isWalking) wishSpeed = 4.2;
 
-    // Apply acceleration
-    this.playerVelocity.x += moveDir.x * accel * delta;
-    this.playerVelocity.z += moveDir.z * accel * delta;
-
-    // Ground friction
-    const friction = this.isGrounded ? 8.5 : 1.5;
-    this.playerVelocity.x -= this.playerVelocity.x * friction * delta;
-    this.playerVelocity.z -= this.playerVelocity.z * friction * delta;
-
-    // Clamp horizontal speed
-    const horizSpeed = Math.sqrt(this.playerVelocity.x ** 2 + this.playerVelocity.z ** 2);
-    if (horizSpeed > baseSpeed) {
-      this.playerVelocity.x = (this.playerVelocity.x / horizSpeed) * baseSpeed;
-      this.playerVelocity.z = (this.playerVelocity.z / horizSpeed) * baseSpeed;
+    // Tactical knife agility boost (+8%)
+    if (this.currentWeapon === 'knife' && !this.isCrouching) {
+      wishSpeed *= 1.08;
     }
 
-    // Gravity
-    this.playerVelocity.y -= 19.8 * delta;
+    // 5. Ground Friction & Acceleration
+    if (this.isGrounded) {
+      const horizSpeed = Math.hypot(this.playerVelocity.x, this.playerVelocity.z);
+      if (horizSpeed > 0.001) {
+        const friction = 8.5;
+        const drop = horizSpeed * friction * delta;
+        const newSpeed = Math.max(0, horizSpeed - drop);
+        const ratio = newSpeed / horizSpeed;
+        this.playerVelocity.x *= ratio;
+        this.playerVelocity.z *= ratio;
+      }
 
-    // Smooth sliding collision check
+      // Responsive ground acceleration towards wishDir
+      const curSpeed = this.playerVelocity.x * wishDir.x + this.playerVelocity.z * wishDir.z;
+      const addSpeed = wishSpeed - curSpeed;
+      if (addSpeed > 0 && isMoving) {
+        const accelSpeed = Math.min(addSpeed, 48 * delta * wishSpeed);
+        this.playerVelocity.x += accelSpeed * wishDir.x;
+        this.playerVelocity.z += accelSpeed * wishDir.z;
+      }
+    } else {
+      // Fluid CS air strafing / control
+      const airWishSpeed = Math.min(wishSpeed, 3.2);
+      const curAirSpeed = this.playerVelocity.x * wishDir.x + this.playerVelocity.z * wishDir.z;
+      const addSpeed = airWishSpeed - curAirSpeed;
+      if (addSpeed > 0 && isMoving) {
+        const airAccelSpeed = Math.min(addSpeed, 26 * delta * airWishSpeed);
+        this.playerVelocity.x += airAccelSpeed * wishDir.x;
+        this.playerVelocity.z += airAccelSpeed * wishDir.z;
+      }
+
+      // Gentle air drag
+      this.playerVelocity.x *= (1 - 0.4 * delta);
+      this.playerVelocity.z *= (1 - 0.4 * delta);
+    }
+
+    // 6. Clamp horizontal speed
+    const maxSpeed = wishSpeed * 1.15;
+    const currentHoriz = Math.hypot(this.playerVelocity.x, this.playerVelocity.z);
+    if (currentHoriz > maxSpeed) {
+      this.playerVelocity.x = (this.playerVelocity.x / currentHoriz) * maxSpeed;
+      this.playerVelocity.z = (this.playerVelocity.z / currentHoriz) * maxSpeed;
+    }
+
+    // 7. Jump buffering (Coyote time)
+    if (this.jumpBufferTimer > 0) {
+      this.jumpBufferTimer -= delta;
+      if (this.isGrounded) {
+        this.playerVelocity.y = 6.4;
+        this.isGrounded = false;
+        this.jumpBufferTimer = 0;
+      }
+    }
+
+    // 8. Gravity
+    this.playerVelocity.y -= 19.6 * delta;
+
+    // 9. Auto-step collision check
     const radius = 0.42;
-    const eyeHeight = this.isCrouching ? 1.05 : 1.6;
-
     this.moveWithCollisions(delta, radius, eyeHeight);
 
-    // Footsteps sound
-    if (isMoving && this.isGrounded) {
+    // 10. Footstep sounds (silent when tactical walking or crouching)
+    if (isMoving && this.isGrounded && !this.isWalking && !this.isCrouching) {
       this.stepTimer += delta;
-      const stepInterval = this.isCrouching ? 0.5 : 0.34;
-      if (this.stepTimer >= stepInterval) {
+      if (this.stepTimer >= 0.33) {
         sounds.playFootstep();
         this.stepTimer = 0;
       }
@@ -1290,19 +1671,28 @@ export class FPSGameEngine {
       this.stepTimer = 0.2;
     }
 
-    // Head Bobbing calculation
+    // 11. Head bobbing calculation (subtle and smooth)
     if (isMoving && this.isGrounded) {
-      this.bobTimer += delta * (this.isCrouching ? 7 : 12);
+      const bobFreq = this.isCrouching ? 7 : (this.isWalking ? 8 : 12);
+      this.bobTimer += delta * bobFreq;
+    } else {
+      this.bobTimer = THREE.MathUtils.lerp(this.bobTimer, 0, delta * 6);
     }
+
+    // 12. Strafe camera roll tilt (-1 deg to +1 deg)
+    let targetRoll = 0;
+    if (this.moveLeft) targetRoll += 0.016;
+    if (this.moveRight) targetRoll -= 0.016;
+    this.cameraRoll = THREE.MathUtils.lerp(this.cameraRoll, targetRoll, delta * 10);
   }
 
-  // Smooth sliding collision along separate axes
+  // Smooth sliding collision with auto-step climbing (glides over curbs, stairs and crate lips)
   private moveWithCollisions(delta: number, radius: number, eyeHeight: number) {
     const feetY = this.playerPos.y - eyeHeight;
     const headY = this.playerPos.y + 0.2;
+    const stepHeight = 0.36; // Maximum curb / step height player can walk up
 
-    // 1. Move X & check collision
-    const oldX = this.playerPos.x;
+    // 1. Move X & check collision with auto-step
     this.playerPos.x += this.playerVelocity.x * delta;
 
     for (const b of this.mapData.colliders) {
@@ -1313,21 +1703,26 @@ export class FPSGameEngine {
           this.playerPos.z + radius > b.minZ &&
           this.playerPos.z - radius < b.maxZ
         ) {
-          if (this.playerVelocity.x > 0) {
-            this.playerPos.x = b.minX - radius;
-          } else if (this.playerVelocity.x < 0) {
-            this.playerPos.x = b.maxX + radius;
+          // Check if this obstacle is low enough to step onto (e.g. ramp step or curb)
+          const obstacleStep = b.maxY - feetY;
+          if (obstacleStep > 0 && obstacleStep <= stepHeight && this.playerVelocity.y <= 0) {
+            // Step up smoothly onto obstacle top
+            this.playerPos.y = Math.max(this.playerPos.y, b.maxY + eyeHeight);
+            this.isGrounded = true;
           } else {
-            this.playerPos.x = oldX;
+            // Tall obstacle: slide along wall
+            if (this.playerVelocity.x > 0) {
+              this.playerPos.x = b.minX - radius - 0.001;
+            } else if (this.playerVelocity.x < 0) {
+              this.playerPos.x = b.maxX + radius + 0.001;
+            }
+            this.playerVelocity.x = 0;
           }
-          this.playerVelocity.x = 0;
-          break;
         }
       }
     }
 
-    // 2. Move Z & check collision
-    const oldZ = this.playerPos.z;
+    // 2. Move Z & check collision with auto-step
     this.playerPos.z += this.playerVelocity.z * delta;
 
     for (const b of this.mapData.colliders) {
@@ -1338,15 +1733,20 @@ export class FPSGameEngine {
           this.playerPos.z + radius > b.minZ &&
           this.playerPos.z - radius < b.maxZ
         ) {
-          if (this.playerVelocity.z > 0) {
-            this.playerPos.z = b.minZ - radius;
-          } else if (this.playerVelocity.z < 0) {
-            this.playerPos.z = b.maxZ + radius;
+          // Check if obstacle is low enough to step onto
+          const obstacleStep = b.maxY - feetY;
+          if (obstacleStep > 0 && obstacleStep <= stepHeight && this.playerVelocity.y <= 0) {
+            this.playerPos.y = Math.max(this.playerPos.y, b.maxY + eyeHeight);
+            this.isGrounded = true;
           } else {
-            this.playerPos.z = oldZ;
+            // Tall obstacle: slide along wall
+            if (this.playerVelocity.z > 0) {
+              this.playerPos.z = b.minZ - radius - 0.001;
+            } else if (this.playerVelocity.z < 0) {
+              this.playerPos.z = b.maxZ + radius + 0.001;
+            }
+            this.playerVelocity.z = 0;
           }
-          this.playerVelocity.z = 0;
-          break;
         }
       }
     }
@@ -1354,33 +1754,31 @@ export class FPSGameEngine {
     // 3. Move Y
     this.playerPos.y += this.playerVelocity.y * delta;
 
-    // Floor check (y = 0)
-    if (this.playerPos.y <= eyeHeight) {
-      this.playerPos.y = eyeHeight;
+    // Ground check: check main floor (y = 0) and any elevated platforms under feet
+    let groundY = eyeHeight;
+    for (const box of this.mapData.colliders) {
+      if (
+        this.playerPos.x + radius > box.minX &&
+        this.playerPos.x - radius < box.maxX &&
+        this.playerPos.z + radius > box.minZ &&
+        this.playerPos.z - radius < box.maxZ
+      ) {
+        const topY = box.maxY + eyeHeight;
+        // If player is on or just above this box top
+        if (this.playerPos.y >= topY - 0.4 && this.playerPos.y <= topY + 0.45 && this.playerVelocity.y <= 0) {
+          if (topY > groundY) {
+            groundY = topY;
+          }
+        }
+      }
+    }
+
+    if (this.playerPos.y <= groundY) {
+      this.playerPos.y = groundY;
       this.playerVelocity.y = 0;
       this.isGrounded = true;
     } else {
       this.isGrounded = false;
-      // Also check elevated crates and catwalk
-      for (const box of this.mapData.colliders) {
-        if (
-          this.playerPos.x + radius > box.minX &&
-          this.playerPos.x - radius < box.maxX &&
-          this.playerPos.z + radius > box.minZ &&
-          this.playerPos.z - radius < box.maxZ
-        ) {
-          if (
-            this.playerPos.y - eyeHeight >= box.maxY - 0.35 &&
-            this.playerPos.y - eyeHeight <= box.maxY + 0.4 &&
-            this.playerVelocity.y <= 0
-          ) {
-            this.playerPos.y = box.maxY + eyeHeight;
-            this.playerVelocity.y = 0;
-            this.isGrounded = true;
-            break;
-          }
-        }
-      }
     }
   }
 
@@ -1406,6 +1804,7 @@ export class FPSGameEngine {
     this.camera.rotation.order = 'YXZ';
     this.camera.rotation.y = targetYaw;
     this.camera.rotation.x = targetPitch;
+    this.camera.rotation.z = this.cameraRoll;
 
     // Bobbing offset
     const bobX = Math.cos(this.bobTimer) * 0.02;
@@ -1420,6 +1819,20 @@ export class FPSGameEngine {
     const swayX = -bobX * 0.8;
     const swayY = -bobY * 0.8;
     this.fpCameraRig.position.set(swayX, swayY, 0);
+
+    // Smoothly recover firearm viewmodel kickback & mechanism cycling
+    this.gunKickZ = THREE.MathUtils.lerp(this.gunKickZ, 0, delta * 20);
+    this.gunKickRotX = THREE.MathUtils.lerp(this.gunKickRotX, 0, delta * 20);
+
+    if (this.currentWeapon === 'ak47') {
+      this.ak47Rig.group.position.set(0.22, -0.21, -0.42 + this.gunKickZ);
+      this.ak47Rig.group.rotation.set(0.01 + this.gunKickRotX, -0.012, 0);
+      this.ak47Rig.boltMesh.position.z = THREE.MathUtils.lerp(this.ak47Rig.boltMesh.position.z, -0.01, delta * 22);
+    } else if (this.currentWeapon === 'pistol') {
+      this.pistolRig.group.position.set(0.20, -0.19, -0.38 + this.gunKickZ);
+      this.pistolRig.group.rotation.set(0.012 + this.gunKickRotX, -0.012, 0);
+      this.pistolRig.slideMesh.position.z = THREE.MathUtils.lerp(this.pistolRig.slideMesh.position.z, -0.06, delta * 22);
+    }
 
     // Knife Attack Animation (Slash arc or heavy thrust)
     if (this.currentWeapon === 'knife') {
@@ -1510,20 +1923,30 @@ export class FPSGameEngine {
 
     this.botManager.update(delta, potentialTargets);
 
-    // 5. Update Remote Players lerp
+    // 5. Update Remote Players lerp & visibility
     this.remotePlayers.forEach(rp => {
-      rp.position.lerp(rp.targetPos, delta * 12);
-      rp.meshData.mesh.position.copy(rp.position);
-      rp.meshData.mesh.rotation.y = rp.rotY;
+      if (rp.health > 0) {
+        rp.position.lerp(rp.targetPos, delta * 14);
+        rp.meshData.mesh.position.copy(rp.position);
+        rp.meshData.mesh.rotation.y = rp.rotY;
+        rp.meshData.mesh.visible = true;
+      } else {
+        rp.meshData.mesh.visible = false;
+      }
     });
 
     // 6. Update Tracers
     for (let i = this.bulletTracers.length - 1; i >= 0; i--) {
       const tr = this.bulletTracers[i];
       if (now >= tr.expire) {
-        this.scene.remove(tr.line);
-        tr.line.geometry.dispose();
-        (tr.line.material as THREE.Material).dispose();
+        this.scene.remove(tr.obj);
+        tr.obj.traverse((child: any) => {
+          if (child.geometry) child.geometry.dispose();
+          if (child.material) {
+            if (Array.isArray(child.material)) child.material.forEach((m: any) => m.dispose());
+            else child.material.dispose();
+          }
+        });
         this.bulletTracers.splice(i, 1);
       }
     }
@@ -1582,28 +2005,53 @@ export class FPSGameEngine {
           weapon: this.currentWeapon
         }));
       }
+
+      // If room host, also sync bot positions to other clients (15Hz)
+      if (this.isHost && now - this.lastBotNetSend >= 66) {
+        this.lastBotNetSend = now;
+        this.botManager.getAllBots().forEach(bot => {
+          if (bot.isAlive) {
+            this.ws?.send(JSON.stringify({
+              type: 'sync_bot',
+              botId: bot.id,
+              x: bot.position.x,
+              y: bot.position.y,
+              z: bot.position.z,
+              rotY: bot.rotY,
+              pitch: 0,
+              weapon: bot.weapon
+            }));
+          }
+        });
+      }
     }
 
-    // 11. Radar data collection
-    const allies: { x: number; z: number }[] = [];
-    const enemies: { x: number; z: number }[] = [];
+    // 11. Radar data collection (with full 3D coordinates and rotation)
+    const allies: { x: number; y: number; z: number; name?: string; rotY?: number }[] = [];
+    const enemies: { x: number; y: number; z: number; rotY?: number }[] = [];
 
     this.botManager.getAllBots().forEach(b => {
       if (b.isAlive) {
-        if (b.team === this.team) allies.push({ x: b.position.x, z: b.position.z });
-        else enemies.push({ x: b.position.x, z: b.position.z });
+        if (b.team === this.team) {
+          allies.push({ x: b.position.x, y: b.position.y, z: b.position.z, name: b.name, rotY: b.rotY });
+        } else {
+          enemies.push({ x: b.position.x, y: b.position.y, z: b.position.z, rotY: b.rotY });
+        }
       }
     });
 
     this.remotePlayers.forEach(rp => {
       if (rp.health > 0) {
-        if (rp.team === this.team) allies.push({ x: rp.position.x, z: rp.position.z });
-        else enemies.push({ x: rp.position.x, z: rp.position.z });
+        if (rp.team === this.team) {
+          allies.push({ x: rp.position.x, y: rp.position.y, z: rp.position.z, name: rp.name, rotY: rp.rotY });
+        } else {
+          enemies.push({ x: rp.position.x, y: rp.position.y, z: rp.position.z, rotY: rp.rotY });
+        }
       }
     });
 
     this.callbacks.onRadarUpdate({
-      playerPos: { x: this.playerPos.x, z: this.playerPos.z, rotY: this.yaw },
+      playerPos: { x: this.playerPos.x, y: this.playerPos.y, z: this.playerPos.z, rotY: this.yaw },
       allies,
       enemies
     });
@@ -1611,6 +2059,7 @@ export class FPSGameEngine {
     // 12. Push HUD Update to React
     this.callbacks.onHUDUpdate({
       health: this.health,
+      armor: this.armor,
       ammo: this.ammoState[this.currentWeapon].mag,
       reserveAmmo: this.ammoState[this.currentWeapon].reserve,
       weapon: this.currentWeapon,
@@ -1641,8 +2090,14 @@ export class FPSGameEngine {
     }
 
     this.bulletTracers.forEach(t => {
-      this.scene.remove(t.line);
-      t.line.geometry.dispose();
+      this.scene.remove(t.obj);
+      t.obj.traverse((child: any) => {
+        if (child.geometry) child.geometry.dispose();
+        if (child.material) {
+          if (Array.isArray(child.material)) child.material.forEach((m: any) => m.dispose());
+          else child.material.dispose();
+        }
+      });
     });
     this.bulletDecals.forEach(d => {
       this.scene.remove(d);

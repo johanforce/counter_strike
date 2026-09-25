@@ -235,12 +235,12 @@ export function buildClassicMap(): MapData {
     colliders,
     spawns: {
       red: [
-        { x: -28, y: 1.6, z: -28, rotY: Math.PI / 4 },
-        { x: -32, y: 1.6, z: -24, rotY: Math.PI / 4 }
+        { x: -28, y: 1.6, z: -28, rotY: -3 * Math.PI / 4 },
+        { x: -32, y: 1.6, z: -24, rotY: -3 * Math.PI / 4 }
       ],
       blue: [
-        { x: 28, y: 1.6, z: 28, rotY: -3 * Math.PI / 4 },
-        { x: 24, y: 1.6, z: 32, rotY: -3 * Math.PI / 4 }
+        { x: 28, y: 1.6, z: 28, rotY: Math.PI / 4 },
+        { x: 24, y: 1.6, z: 32, rotY: Math.PI / 4 }
       ]
     },
     patrolPoints

@@ -13,6 +13,7 @@ interface WaitingRoomProps {
   onStartGame: () => void;
   onLeaveRoom: () => void;
   onSwitchTeam: (team: Team) => void;
+  onAddBot?: (team: Team) => void;
 }
 
 export const WaitingRoom: React.FC<WaitingRoomProps> = ({
@@ -25,7 +26,8 @@ export const WaitingRoom: React.FC<WaitingRoomProps> = ({
   errorMsg,
   onStartGame,
   onLeaveRoom,
-  onSwitchTeam
+  onSwitchTeam,
+  onAddBot
 }) => {
   const [copiedCode, setCopiedCode] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
@@ -160,9 +162,20 @@ export const WaitingRoom: React.FC<WaitingRoomProps> = ({
                 <Flame className="w-4 h-4" />
                 <span>ĐỘI ĐỎ (PHOENIX)</span>
               </div>
-              <span className="text-xs font-bold px-2 py-0.5 rounded bg-red-950 text-red-400 border border-red-800/40">
-                {redPlayers.length}/{maxPerTeam} Người
-              </span>
+              <div className="flex items-center gap-2">
+                {isHost && redPlayers.length < maxPerTeam && onAddBot && (
+                  <button
+                    type="button"
+                    onClick={() => onAddBot('red')}
+                    className="text-[11px] font-bold px-2 py-0.5 rounded bg-red-900/60 hover:bg-red-800 text-red-200 border border-red-700/60 transition-colors flex items-center gap-1 cursor-pointer"
+                  >
+                    + Thêm BOT
+                  </button>
+                )}
+                <span className="text-xs font-bold px-2 py-0.5 rounded bg-red-950 text-red-400 border border-red-800/40">
+                  {redPlayers.length}/{maxPerTeam} Người
+                </span>
+              </div>
             </div>
 
             <div className="flex flex-col gap-2 min-h-[110px]">
@@ -192,6 +205,11 @@ export const WaitingRoom: React.FC<WaitingRoomProps> = ({
                                 BẠN
                               </span>
                             )}
+                            {player.isBot && (
+                              <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-neutral-800 text-neutral-400 border border-neutral-700">
+                                BOT MÁY
+                              </span>
+                            )}
                             {isPlayerHost && (
                               <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/40 flex items-center gap-1">
                                 <Sparkles className="w-2.5 h-2.5" /> CHỦ PHÒNG
@@ -202,7 +220,7 @@ export const WaitingRoom: React.FC<WaitingRoomProps> = ({
                         </div>
                       </div>
                       <span className="text-[11px] font-mono text-emerald-400 bg-emerald-950/50 px-2 py-0.5 rounded border border-emerald-800/40">
-                        {player.ping}ms
+                        {player.isBot ? '0ms' : `${player.ping}ms`}
                       </span>
                     </div>
                   );
@@ -211,9 +229,9 @@ export const WaitingRoom: React.FC<WaitingRoomProps> = ({
                 return (
                   <div
                     key={`red_empty_${idx}`}
-                    className="p-3 rounded-lg border border-dashed border-neutral-800/80 bg-neutral-950/30 flex items-center justify-between text-neutral-600"
+                    className="p-3 rounded-lg border border-dashed border-neutral-800/80 bg-neutral-950/30 flex items-center justify-between text-neutral-400"
                   >
-                    <span className="text-xs italic">Vị trí trống (Đang chờ...)</span>
+                    <span className="text-xs">Trống (BOT tự động tham gia nếu thiếu)</span>
                     {currentTeam !== 'red' && (
                       <button
                         type="button"
@@ -236,9 +254,20 @@ export const WaitingRoom: React.FC<WaitingRoomProps> = ({
                 <Shield className="w-4 h-4" />
                 <span>ĐỘI XANH (CT / SEAL)</span>
               </div>
-              <span className="text-xs font-bold px-2 py-0.5 rounded bg-blue-950 text-blue-400 border border-blue-800/40">
-                {bluePlayers.length}/{maxPerTeam} Người
-              </span>
+              <div className="flex items-center gap-2">
+                {isHost && bluePlayers.length < maxPerTeam && onAddBot && (
+                  <button
+                    type="button"
+                    onClick={() => onAddBot('blue')}
+                    className="text-[11px] font-bold px-2 py-0.5 rounded bg-blue-900/60 hover:bg-blue-800 text-blue-200 border border-blue-700/60 transition-colors flex items-center gap-1 cursor-pointer"
+                  >
+                    + Thêm BOT
+                  </button>
+                )}
+                <span className="text-xs font-bold px-2 py-0.5 rounded bg-blue-950 text-blue-400 border border-blue-800/40">
+                  {bluePlayers.length}/{maxPerTeam} Người
+                </span>
+              </div>
             </div>
 
             <div className="flex flex-col gap-2 min-h-[110px]">
@@ -268,6 +297,11 @@ export const WaitingRoom: React.FC<WaitingRoomProps> = ({
                                 BẠN
                               </span>
                             )}
+                            {player.isBot && (
+                              <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-neutral-800 text-neutral-400 border border-neutral-700">
+                                BOT MÁY
+                              </span>
+                            )}
                             {isPlayerHost && (
                               <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/40 flex items-center gap-1">
                                 <Sparkles className="w-2.5 h-2.5" /> CHỦ PHÒNG
@@ -278,7 +312,7 @@ export const WaitingRoom: React.FC<WaitingRoomProps> = ({
                         </div>
                       </div>
                       <span className="text-[11px] font-mono text-emerald-400 bg-emerald-950/50 px-2 py-0.5 rounded border border-emerald-800/40">
-                        {player.ping}ms
+                        {player.isBot ? '0ms' : `${player.ping}ms`}
                       </span>
                     </div>
                   );
@@ -287,9 +321,9 @@ export const WaitingRoom: React.FC<WaitingRoomProps> = ({
                 return (
                   <div
                     key={`blue_empty_${idx}`}
-                    className="p-3 rounded-lg border border-dashed border-neutral-800/80 bg-neutral-950/30 flex items-center justify-between text-neutral-600"
+                    className="p-3 rounded-lg border border-dashed border-neutral-800/80 bg-neutral-950/30 flex items-center justify-between text-neutral-400"
                   >
-                    <span className="text-xs italic">Vị trí trống (Đang chờ...)</span>
+                    <span className="text-xs">Trống (BOT tự động tham gia nếu thiếu)</span>
                     {currentTeam !== 'blue' && (
                       <button
                         type="button"
@@ -314,8 +348,8 @@ export const WaitingRoom: React.FC<WaitingRoomProps> = ({
               Tổng số người trong phòng: <strong className="text-white">{players.length}</strong> / {maxPerTeam * 2}
             </span>
           </div>
-          <div className="text-neutral-500">
-            Mẹo: Chia sẻ mã <strong className="text-amber-400 font-mono">{roomCode}</strong> để bạn bè cùng tham chiến!
+          <div className="text-neutral-400 text-xs">
+            💡 Mẹo: Hệ thống sẽ tự động thêm BOT chiến thuật nếu chưa đủ người khi bắt đầu để trận đấu luôn đông đủ!
           </div>
         </div>
 

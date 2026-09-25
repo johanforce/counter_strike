@@ -711,8 +711,8 @@ export function createPlayerMesh(team: Team, name: string): {
   weaponHolder.add(knifeMesh);
 
   const updateWeapon = (type: WeaponType) => {
-    akMesh.visible = type === 'ak47' || type === 'm4a4' || type === 'awp' || type === 'mp9' || type === 'shotgun';
-    pistolMesh.visible = type === 'pistol' || type === 'glock';
+    akMesh.visible = type === 'ak47';
+    pistolMesh.visible = type === 'pistol';
     knifeMesh.visible = type === 'knife';
   };
   updateWeapon('ak47');

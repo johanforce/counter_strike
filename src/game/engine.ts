@@ -6,7 +6,7 @@ import {
   KillFeedEvent,
   GameSettings,
   WEAPONS,
-  CS_BUY_ITEMS
+  ChatMessage
 } from '../types/game';
 import { textures } from './textures';
 import {
@@ -15,7 +15,7 @@ import {
   createFirstPersonKnife,
   createPlayerMesh
 } from './models';
-import { buildClassicMap, MapData, CollisionBox } from './map';
+import { buildClassicMap, MapData } from './map';
 import { sounds } from './audio';
 import { BotManager, BotInstance } from './ai';
 
@@ -35,10 +35,7 @@ export interface GameEngineCallbacks {
     hitMarker: boolean;
     isDead: boolean;
     respawnTimer: number;
-    money: number;
-    inBuyZone: boolean;
-    isBuyMenuOpen: boolean;
-    isScoped: boolean;
+    headshotKill?: boolean;
   }) => void;
   onKillFeed: (event: KillFeedEvent) => void;
   onRadarUpdate: (data: {
@@ -53,7 +50,8 @@ export interface GameEngineCallbacks {
   }) => void;
   onConnectionChange: (connected: boolean) => void;
   onRoomUpdate?: (room: any) => void;
-  onToggleBuyMenu?: (open: boolean) => void;
+  onChatMessage?: (msg: ChatMessage) => void;
+  onBuyMenuToggle?: () => void;
 }
 
 export class FPSGameEngine {
@@ -74,28 +72,17 @@ export class FPSGameEngine {
   public mode: GameMode;
   public health: number = 100;
   public armor: number = 100;
-  public hasHelmet: boolean = true;
   public isAlive: boolean = true;
   public respawnTimer: number = 0;
-  public money: number = 800; // Counter-Strike standard $800 start money
-  public isBuyMenuOpen: boolean = false;
-  public isSniperScoped: boolean = false;
   public currentWeapon: WeaponType = 'ak47';
-  public primaryWeapon: WeaponType = 'ak47';
-  public secondaryWeapon: WeaponType = 'pistol';
-
   public ammoState: Record<WeaponType, { mag: number; reserve: number }> = {
     ak47: { mag: 30, reserve: 90 },
-    m4a4: { mag: 30, reserve: 90 },
-    awp: { mag: 5, reserve: 30 },
-    mp9: { mag: 30, reserve: 120 },
-    shotgun: { mag: 7, reserve: 32 },
-    pistol: { mag: 7, reserve: 35 },
-    glock: { mag: 20, reserve: 120 },
+    pistol: { mag: 12, reserve: 36 },
     knife: { mag: 1, reserve: 0 }
   };
   public isReloading: boolean = false;
   public reloadEndTime: number = 0;
+  public isGodMode: boolean = false;
 
   // First-person viewmodels
   private fpCameraRig: THREE.Group;
@@ -125,8 +112,7 @@ export class FPSGameEngine {
   private jumpBufferTimer: number = 0;
   private isPointerLocked: boolean = false;
 
-  // Input states (Robust tracking preventing stuck keys or inverted W/S)
-  private pressedKeys = new Set<string>();
+  // Input states (Robust multi-keyboard & IME support)
   private moveForward: boolean = false;
   private moveBackward: boolean = false;
   private moveLeft: boolean = false;
@@ -134,7 +120,6 @@ export class FPSGameEngine {
   private isMouseDown: boolean = false;
   private isFiring: boolean = false;
   private lastFireTime: number = 0;
-  private sprayCount: number = 0;
   private stepTimer: number = 0;
   private bobTimer: number = 0;
   private recoilPitch: number = 0;
@@ -160,6 +145,8 @@ export class FPSGameEngine {
   private bulletDecals: THREE.Mesh[] = [];
   private knifeScratchDecals: THREE.Mesh[] = [];
   private particles: { mesh: THREE.Points; velocities: THREE.Vector3[]; expire: number }[] = [];
+  private screenShakeAmount: number = 0;
+  private screenShakeTrauma: number = 0;
 
   // Match State
   private redScore: number = 0;
@@ -481,11 +468,8 @@ export class FPSGameEngine {
     origin?: { x: number; y: number; z: number };
     direction?: { x: number; y: number; z: number };
     damage?: number;
-    health?: number;
-    armor?: number;
     targetId?: string;
     attackerId?: string;
-    attackerName?: string;
     isHeadshot?: boolean;
     killerId?: string;
     killerName?: string;
@@ -570,25 +554,13 @@ export class FPSGameEngine {
       }
     } else if (msg.type === 'player_damaged') {
       if (msg.targetId === this.localPlayerId) {
-        if (msg.health !== undefined) this.health = msg.health;
-        else this.health = Math.max(0, this.health - (msg.damage || 25));
-
-        if (msg.armor !== undefined) this.armor = msg.armor;
-
-        sounds.playPlayerHurt();
-        this.pitch += 0.025;
-        this.yaw += (Math.random() - 0.5) * 0.03;
-        this.pushHUD();
-
-        if (this.health <= 0 && this.isAlive) {
-          this.handlePlayerDeath(msg.attackerName || 'Đối thủ');
-        }
+        this.takeDamage(msg.damage || 25, !!msg.isHeadshot, 'Đối thủ');
       } else if (this.isHost && msg.targetId && this.botManager.getBot(msg.targetId)) {
         this.botManager.applyDamage(msg.targetId, msg.damage || 25, !!msg.isHeadshot, msg.attackerId || 'unknown');
       } else {
         const rp = this.remotePlayers.get(msg.targetId || '');
         if (rp) {
-          rp.health = msg.health !== undefined ? msg.health : Math.max(0, rp.health - (msg.damage || 0));
+          rp.health = msg.damage !== undefined ? Math.max(0, rp.health - msg.damage) : 0;
           rp.meshData.updateHealthTag(rp.health);
           if (rp.health <= 0) {
             rp.meshData.mesh.visible = false;
@@ -596,6 +568,27 @@ export class FPSGameEngine {
         }
       }
     } else if (msg.type === 'player_killed') {
+      if (msg.killerId === this.localPlayerId && msg.isHeadshot) {
+        this.triggerHeadshotFeedback();
+        this.callbacks.onHUDUpdate({
+          health: this.health,
+          armor: this.armor,
+          ammo: this.ammoState[this.currentWeapon].mag,
+          reserveAmmo: this.ammoState[this.currentWeapon].reserve,
+          weapon: this.currentWeapon,
+          isReloading: this.isReloading,
+          redScore: this.redScore,
+          blueScore: this.blueScore,
+          round: this.currentRound,
+          timeLeft: this.roundTimeLeft,
+          isLocked: this.isPointerLocked,
+          hitMarker: true,
+          isDead: !this.isAlive,
+          respawnTimer: this.respawnTimer,
+          headshotKill: true
+        });
+      }
+
       this.callbacks.onKillFeed({
         id: 'kf_' + Math.random(),
         killerName: msg.killerName || 'Vô danh',
@@ -676,6 +669,18 @@ export class FPSGameEngine {
         this.remotePlayers.delete(msg.playerId);
       }
       this.cachedPlayers.delete(msg.playerId);
+    } else if (msg.type === 'chat_message') {
+      const chatMsg: ChatMessage = {
+        id: (msg as any).id || ('chat_' + Date.now()),
+        senderId: (msg as any).senderId || '',
+        senderName: (msg as any).senderName || 'Người chơi',
+        team: (msg as any).team || 'red',
+        channel: (msg as any).channel || 'team',
+        text: (msg as any).text || '',
+        timestamp: (msg as any).timestamp || Date.now()
+      };
+      this.callbacks.onChatMessage?.(chatMsg);
+      sounds.playRadioChatSound();
     }
   }
 
@@ -717,168 +722,93 @@ export class FPSGameEngine {
     }
   }
 
-  // Buy Zone & Shop System
-  public isInBuyZone(): boolean {
-    if (this.roundEnded || !this.isAlive) return false;
-    // Freeze time / Buy time: first 25 seconds of each round
-    if (this.roundTimeLeft >= 65) return true;
-    // Or in spawn zone
-    const spawnX = this.team === 'red' ? -28 : 28;
-    const spawnZ = this.team === 'red' ? -28 : 28;
-    const distSq = (this.playerPos.x - spawnX) ** 2 + (this.playerPos.z - spawnZ) ** 2;
-    return distSq <= 18 * 18;
+  // Helper to check if an interactive input (chat, text input, modal) has focus
+  public isInputFocused(): boolean {
+    const el = document.activeElement;
+    if (!el) return false;
+    const tag = el.tagName.toLowerCase();
+    return tag === 'input' || tag === 'textarea' || (el as HTMLElement).isContentEditable;
   }
 
-  public buyItem(itemId: string): boolean {
-    const item = CS_BUY_ITEMS.find(i => i.id === itemId);
-    if (!item) return false;
-    if (this.money < item.price) return false;
-    if (!this.isInBuyZone()) return false;
-
-    this.money -= item.price;
-    sounds.playBuySound();
-
-    if (item.category === 'gear') {
-      if (item.id === 'kevlar') {
-        this.armor = 100;
-      } else if (item.id === 'helmet') {
-        this.armor = 100;
-        this.hasHelmet = true;
-      } else if (item.id === 'ammo_refill') {
-        (Object.keys(this.ammoState) as WeaponType[]).forEach((wKey) => {
-          const w = WEAPONS[wKey];
-          if (w) this.ammoState[wKey].reserve = w.maxReserveAmmo;
-        });
-      }
-    } else if (item.weaponType) {
-      const wData = WEAPONS[item.weaponType];
-      if (wData.slot === 1) {
-        this.primaryWeapon = item.weaponType;
-      } else if (wData.slot === 2) {
-        this.secondaryWeapon = item.weaponType;
-      }
-      this.ammoState[item.weaponType] = { mag: wData.magSize, reserve: wData.maxReserveAmmo };
-      this.setWeapon(item.weaponType, true);
-
-      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-        this.ws.send(JSON.stringify({
-          type: 'buy_weapon',
-          weapon: item.weaponType,
-          armor: this.armor
-        }));
-      }
-    }
-
-    this.pushHUD();
-    return true;
+  // Clear all player movement and action keys immediately
+  public clearMovementState() {
+    this.moveForward = false;
+    this.moveBackward = false;
+    this.moveLeft = false;
+    this.moveRight = false;
+    this.isWalking = false;
+    this.isCrouching = false;
+    this.isFiring = false;
+    this.isMouseDown = false;
   }
 
-  public toggleBuyMenu() {
-    this.isBuyMenuOpen = !this.isBuyMenuOpen;
-    if (this.isBuyMenuOpen) {
-      this.unlock();
-      this.pressedKeys.clear();
-      this.callbacks.onToggleBuyMenu?.(true);
-    } else {
-      this.callbacks.onToggleBuyMenu?.(false);
-      this.requestLock();
-    }
-    this.pushHUD();
-  }
-
-  public closeBuyMenu() {
-    if (this.isBuyMenuOpen) {
-      this.isBuyMenuOpen = false;
-      this.callbacks.onToggleBuyMenu?.(false);
-      this.requestLock();
-      this.pushHUD();
-    }
-  }
-
-  public pushHUD(hitMarker: boolean = false) {
-    this.callbacks.onHUDUpdate({
-      health: this.health,
-      armor: this.armor,
-      ammo: this.ammoState[this.currentWeapon]?.mag || 0,
-      reserveAmmo: this.ammoState[this.currentWeapon]?.reserve || 0,
-      weapon: this.currentWeapon,
-      isReloading: this.isReloading,
-      redScore: this.redScore,
-      blueScore: this.blueScore,
-      round: this.currentRound,
-      timeLeft: Math.ceil(this.roundTimeLeft),
-      isLocked: this.isPointerLocked,
-      hitMarker,
-      isDead: !this.isAlive,
-      respawnTimer: Math.ceil(this.respawnTimer),
-      money: this.money,
-      inBuyZone: this.isInBuyZone(),
-      isBuyMenuOpen: this.isBuyMenuOpen,
-      isScoped: this.isSniperScoped
-    });
-  }
-
-  public isMovingForward(): boolean {
-    return this.moveForward;
-  }
-  public isMovingBackward(): boolean {
-    return this.moveBackward;
-  }
-  public isMovingLeft(): boolean {
-    return this.moveLeft;
-  }
-  public isMovingRight(): boolean {
-    return this.moveRight;
-  }
-
-  // Setup Key and Mouse Listeners (Rock-solid physical code tracking & IME immunity)
+  // Setup Key and Mouse Listeners (Supporting Vietnamese keyboard/IME layouts, EVKey/Unikey & sticky prevention)
   private setupInputs() {
-    const isFwd = (e: KeyboardEvent) =>
-      e.code === 'KeyW' || e.code === 'ArrowUp' || e.key === 'w' || e.key === 'W' || e.key === 'ư' || e.key === 'Ư';
-    const isBwd = (e: KeyboardEvent) =>
-      e.code === 'KeyS' || e.code === 'ArrowDown' || e.key === 's' || e.key === 'S';
-    const isLft = (e: KeyboardEvent) =>
-      e.code === 'KeyA' || e.code === 'ArrowLeft' || e.key === 'a' || e.key === 'A';
-    const isRgt = (e: KeyboardEvent) =>
-      e.code === 'KeyD' || e.code === 'ArrowRight' || e.key === 'd' || e.key === 'D';
+    // Robust key matching (Physical codes + key codes + full Vietnamese character sets)
+    const isForward = (e: KeyboardEvent) => {
+      if (e.code === 'KeyW' || e.code === 'ArrowUp' || e.keyCode === 87 || e.keyCode === 38) return true;
+      const k = e.key ? e.key.toLowerCase() : '';
+      return ['w', 'ư', 'ứ', 'ừ', 'ử', 'ữ', 'ự'].includes(k);
+    };
+
+    const isBackward = (e: KeyboardEvent) => {
+      if (e.code === 'KeyS' || e.code === 'ArrowDown' || e.keyCode === 83 || e.keyCode === 40) return true;
+      const k = e.key ? e.key.toLowerCase() : '';
+      return k === 's';
+    };
+
+    const isLeft = (e: KeyboardEvent) => {
+      if (e.code === 'KeyA' || e.code === 'ArrowLeft' || e.keyCode === 65 || e.keyCode === 37) return true;
+      const k = e.key ? e.key.toLowerCase() : '';
+      return ['a', 'â', 'ă', 'á', 'à', 'ả', 'ã', 'ạ', 'ấ', 'ầ', 'ẩ', 'ẫ', 'ậ', 'ắ', 'ằ', 'ẳ', 'ẵ', 'ặ'].includes(k);
+    };
+
+    const isRight = (e: KeyboardEvent) => {
+      if (e.code === 'KeyD' || e.code === 'ArrowRight' || e.keyCode === 68 || e.keyCode === 39) return true;
+      const k = e.key ? e.key.toLowerCase() : '';
+      return ['d', 'đ'].includes(k);
+    };
+
+    const isWalk = (e: KeyboardEvent) => {
+      return e.code === 'ShiftLeft' || e.code === 'ShiftRight' || e.keyCode === 16 || e.shiftKey;
+    };
+
+    const isCrouch = (e: KeyboardEvent) => {
+      if (e.code === 'KeyC' || e.code === 'ControlLeft' || e.code === 'ControlRight' || e.keyCode === 67 || e.keyCode === 17) return true;
+      const k = e.key ? e.key.toLowerCase() : '';
+      return k === 'c';
+    };
 
     const onKeyDown = (e: KeyboardEvent) => {
-      const code = e.code;
-      const key = e.key ? e.key.toLowerCase() : '';
-      if (code) this.pressedKeys.add(code);
-      if (key) this.pressedKeys.add(key);
-
-      if (isFwd(e)) this.moveForward = true;
-      if (isBwd(e)) this.moveBackward = true;
-      if (isLft(e)) this.moveLeft = true;
-      if (isRgt(e)) this.moveRight = true;
-
-      // Buy Menu toggle (B key)
-      if (code === 'KeyB' || key === 'b') {
-        if (this.isInBuyZone()) {
-          this.toggleBuyMenu();
-          return;
-        }
-      }
-
-      // Close buy menu on Escape
-      if (code === 'Escape' && this.isBuyMenuOpen) {
-        this.closeBuyMenu();
+      // If typing in chat or another input, cancel any movement and do not intercept
+      if (this.isInputFocused()) {
+        this.clearMovementState();
         return;
       }
 
-      // Weapon slots (1: Primary, 2: Secondary, 3: Knife)
-      if (code === 'Digit1') this.setWeapon(this.primaryWeapon);
-      if (code === 'Digit2') this.setWeapon(this.secondaryWeapon);
-      if (code === 'Digit3') this.setWeapon('knife');
+      if (isForward(e)) { this.moveForward = true; }
+      if (isBackward(e)) { this.moveBackward = true; }
+      if (isLeft(e)) { this.moveLeft = true; }
+      if (isRight(e)) { this.moveRight = true; }
+
+      // Weapon slots (1: AK-47, 2: Pistol, 3: Knife)
+      if (e.code === 'Digit1' || e.key === '1') this.setWeapon('ak47');
+      if (e.code === 'Digit2' || e.key === '2') this.setWeapon('pistol');
+      if (e.code === 'Digit3' || e.key === '3') this.setWeapon('knife');
 
       // Reload
-      if (code === 'KeyR' || key === 'r') {
+      if (e.code === 'KeyR' || (e.key && e.key.toLowerCase() === 'r') || e.keyCode === 82) {
         this.reloadWeapon();
       }
 
+      // Buy Menu (B Key)
+      if (e.code === 'KeyB' || (e.key && e.key.toLowerCase() === 'b') || e.keyCode === 66) {
+        e.preventDefault();
+        this.callbacks.onBuyMenuToggle?.();
+      }
+
       // Jump (with buffer for responsive timing)
-      if (code === 'Space' && this.isAlive) {
+      if ((e.code === 'Space' || e.keyCode === 32) && this.isAlive) {
         this.jumpBufferTimer = 0.15;
         if (this.isGrounded) {
           this.playerVelocity.y = 6.4;
@@ -888,61 +818,53 @@ export class FPSGameEngine {
       }
 
       // Tactical Walk (Shift)
-      if (code === 'ShiftLeft' || code === 'ShiftRight') {
+      if (isWalk(e)) {
         this.isWalking = true;
       }
 
-      // Crouch
-      if (code === 'KeyC' || code === 'ControlLeft' || key === 'c') {
+      // Crouch (C or Ctrl)
+      if (isCrouch(e)) {
         this.isCrouching = true;
       }
     };
 
     const onKeyUp = (e: KeyboardEvent) => {
-      const code = e.code;
-      const key = e.key ? e.key.toLowerCase() : '';
-      if (code) this.pressedKeys.delete(code);
-      if (key) this.pressedKeys.delete(key);
+      if (this.isInputFocused()) {
+        this.clearMovementState();
+        return;
+      }
 
-      if (isFwd(e)) this.moveForward = false;
-      if (isBwd(e)) this.moveBackward = false;
-      if (isLft(e)) this.moveLeft = false;
-      if (isRgt(e)) this.moveRight = false;
+      if (isForward(e)) { this.moveForward = false; }
+      if (isBackward(e)) { this.moveBackward = false; }
+      if (isLeft(e)) { this.moveLeft = false; }
+      if (isRight(e)) { this.moveRight = false; }
 
-      if (code === 'ShiftLeft' || code === 'ShiftRight') {
+      if (isWalk(e)) {
         this.isWalking = false;
       }
 
-      if (code === 'KeyC' || code === 'ControlLeft' || key === 'c') {
+      if (isCrouch(e)) {
         this.isCrouching = false;
       }
     };
 
     const onMouseDown = (e: MouseEvent) => {
-      if (this.isBuyMenuOpen) return;
+      if (this.isInputFocused()) return;
       this.isMouseDown = true;
       if (!this.isPointerLocked) {
         this.requestLock();
       }
 
-      if (e.button === 0) { // Left click: shoot or knife slash
+      if (e.button === 0) { // Left click
         if (this.currentWeapon === 'knife') {
           this.triggerKnifeAttack(false); // Quick Slash
         } else {
           this.isFiring = true;
           this.triggerShoot();
         }
-      } else if (e.button === 2) { // Right click: knife stab or AWP sniper zoom
+      } else if (e.button === 2) { // Right click
         if (this.currentWeapon === 'knife') {
           this.triggerKnifeAttack(true); // Heavy Stab
-        } else if (this.currentWeapon === 'awp') {
-          // Toggle sniper optical zoom
-          this.isSniperScoped = !this.isSniperScoped;
-          this.camera.fov = this.isSniperScoped ? 22 : (this.settings.fov || 75);
-          this.camera.updateProjectionMatrix();
-          sounds.playSniperZoom();
-          this.ak47Rig.group.visible = !this.isSniperScoped;
-          this.pushHUD();
         }
       }
     };
@@ -951,28 +873,27 @@ export class FPSGameEngine {
       this.isMouseDown = false;
       if (e.button === 0) {
         this.isFiring = false;
-        this.sprayCount = 0;
       }
     };
 
     const onMouseMove = (e: MouseEvent) => {
+      // Allow mouse look whenever locked OR when dragging mouse on canvas
       if (!this.isPointerLocked && !this.isMouseDown) return;
-      if (this.isBuyMenuOpen) return;
 
       const sens = (this.settings.mouseSensitivity || 1.0) * 0.0022;
       const invert = this.settings.invertY ? -1 : 1;
-      const zoomFactor = this.isSniperScoped ? 0.35 : 1.0;
 
-      this.yaw -= (e.movementX || 0) * sens * zoomFactor;
-      this.pitch -= (e.movementY || 0) * sens * invert * zoomFactor;
+      this.yaw -= (e.movementX || 0) * sens;
+      this.pitch -= (e.movementY || 0) * sens * invert;
 
+      // Clamp pitch to avoid gimbal flip (-88 to 88 degrees)
       const maxPitch = Math.PI / 2 - 0.04;
       this.pitch = Math.max(-maxPitch, Math.min(maxPitch, this.pitch));
     };
 
     const onWheel = (e: WheelEvent) => {
-      if (this.isBuyMenuOpen) return;
-      const order: WeaponType[] = [this.primaryWeapon, this.secondaryWeapon, 'knife'];
+      if (this.isInputFocused()) return;
+      const order: WeaponType[] = ['ak47', 'pistol', 'knife'];
       const curIdx = order.indexOf(this.currentWeapon);
       const nextIdx = e.deltaY > 0 ? (curIdx + 1) % 3 : (curIdx - 1 + 3) % 3;
       this.setWeapon(order[nextIdx]);
@@ -983,15 +904,13 @@ export class FPSGameEngine {
     };
 
     const onBlur = () => {
-      this.moveForward = false;
-      this.moveBackward = false;
-      this.moveLeft = false;
-      this.moveRight = false;
-      this.pressedKeys.clear();
-      this.isCrouching = false;
-      this.isWalking = false;
-      this.isFiring = false;
-      this.isMouseDown = false;
+      this.clearMovementState();
+    };
+
+    const onVisibilityChange = () => {
+      if (document.hidden) {
+        this.clearMovementState();
+      }
     };
 
     window.addEventListener('keydown', onKeyDown);
@@ -1003,17 +922,29 @@ export class FPSGameEngine {
     this.container.addEventListener('contextmenu', onContextMenu);
     window.addEventListener('blur', onBlur);
     window.addEventListener('focus', onBlur);
+    document.addEventListener('visibilitychange', onVisibilityChange);
 
     document.addEventListener('pointerlockchange', () => {
       this.isPointerLocked = document.pointerLockElement === this.container;
       if (!this.isPointerLocked) {
-        this.moveForward = false;
-        this.moveBackward = false;
-        this.moveLeft = false;
-        this.moveRight = false;
-        this.pressedKeys.clear();
+        this.clearMovementState();
       }
-      this.pushHUD();
+      this.callbacks.onHUDUpdate({
+        health: this.health,
+        armor: this.armor,
+        ammo: this.ammoState[this.currentWeapon].mag,
+        reserveAmmo: this.ammoState[this.currentWeapon].reserve,
+        weapon: this.currentWeapon,
+        isReloading: this.isReloading,
+        redScore: this.redScore,
+        blueScore: this.blueScore,
+        round: this.currentRound,
+        timeLeft: this.roundTimeLeft,
+        isLocked: this.isPointerLocked,
+        hitMarker: false,
+        isDead: !this.isAlive,
+        respawnTimer: this.respawnTimer
+      });
     });
 
     const onResize = () => {
@@ -1026,11 +957,53 @@ export class FPSGameEngine {
   }
 
   public requestLock() {
-    this.container.requestPointerLock?.();
+    if (this.isPointerLocked) return;
+    try {
+      const p = this.container.requestPointerLock?.();
+      if (p && typeof (p as any).catch === 'function') {
+        (p as any).catch((err: any) => {
+          // Gracefully suppress DOMException about pointerlock timing or gesture
+          console.debug('[PointerLock] Handled lock cooldown/gesture requirement:', err?.message || err);
+        });
+      }
+    } catch (e) {
+      console.debug('[PointerLock] Ignored sync exception:', e);
+    }
   }
 
   public unlock() {
+    this.clearMovementState();
     document.exitPointerLock?.();
+  }
+
+  // Send in-game chat message (/all for all-chat, normal for team-chat)
+  public sendChatMessage(rawText: string) {
+    const text = rawText.trim();
+    if (!text) return;
+
+    const isAll = text.toLowerCase().startsWith('/all ') || text.toLowerCase() === '/all';
+    const cleanText = isAll ? text.replace(/^\/all\s*/i, '').trim() : text;
+    if (!cleanText) return;
+
+    if (this.isOnlineMode && this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({
+        type: 'chat_message',
+        text: rawText
+      }));
+    } else {
+      // Local/offline match chat - only real player message
+      const msg: ChatMessage = {
+        id: 'chat_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+        senderId: this.localPlayerId,
+        senderName: this.playerName,
+        team: this.team,
+        channel: isAll ? 'all' : 'team',
+        text: cleanText,
+        timestamp: Date.now()
+      };
+      this.callbacks.onChatMessage?.(msg);
+      sounds.playRadioChatSound();
+    }
   }
 
   public setWeapon(weapon: WeaponType, force: boolean = false) {
@@ -1038,35 +1011,81 @@ export class FPSGameEngine {
     this.currentWeapon = weapon;
     this.isReloading = false;
 
-    // Reset sniper scope if switching away from AWP
-    if (this.isSniperScoped && weapon !== 'awp') {
-      this.isSniperScoped = false;
-      this.camera.fov = this.settings.fov || 75;
-      this.camera.updateProjectionMatrix();
-    }
+    // Viewmodel visibility - strictly ensure only the active weapon is visible
+    this.ak47Rig.group.visible = weapon === 'ak47';
+    this.pistolRig.group.visible = weapon === 'pistol';
+    this.knifeRig.group.visible = weapon === 'knife';
 
-    const isRifle = weapon === 'ak47' || weapon === 'm4a4' || weapon === 'awp' || weapon === 'mp9' || weapon === 'shotgun';
-    const isPistol = weapon === 'pistol' || weapon === 'glock';
-    const isKnife = weapon === 'knife';
-
-    // Viewmodel visibility
-    this.ak47Rig.group.visible = isRifle && !this.isSniperScoped;
-    this.pistolRig.group.visible = isPistol;
-    this.knifeRig.group.visible = isKnife;
-
-    // Position muzzle flash appropriately
-    if (isRifle) {
+    // Move muzzle flash group to the active weapon's muzzle point
+    if (weapon === 'ak47') {
       this.ak47Rig.muzzlePoint.add(this.muzzleFlashGroup);
-    } else if (isPistol) {
+    } else if (weapon === 'pistol') {
       this.pistolRig.muzzlePoint.add(this.muzzleFlashGroup);
     }
 
-    this.recoilPitch = 0.03;
-    this.pushHUD();
+    // Quick draw recoil kick
+    this.recoilPitch = 0.04;
+  }
+
+  // Subtle screen shake and headshot impact feedback
+  public triggerHeadshotFeedback() {
+    this.screenShakeTrauma = Math.min(1.0, this.screenShakeTrauma + 0.45);
+    // Subtle snappy camera pitch & roll flinch
+    this.pitch -= 0.015;
+    this.cameraRoll = (Math.random() > 0.5 ? 1 : -1) * 0.018;
+  }
+
+  // Buy Menu Actions (CS Economy)
+  public buyArmor(): boolean {
+    if (this.armor >= 100) return false;
+    this.armor = 100;
+    return true;
+  }
+
+  public buyAmmo(type: 'primary' | 'secondary' | 'all'): boolean {
+    let bought = false;
+    if (type === 'primary' || type === 'all') {
+      const ak = this.ammoState.ak47;
+      if (ak.reserve < WEAPONS.ak47.maxReserveAmmo) {
+        ak.reserve = WEAPONS.ak47.maxReserveAmmo;
+        bought = true;
+      }
+    }
+    if (type === 'secondary' || type === 'all') {
+      const p = this.ammoState.pistol;
+      if (p.reserve < WEAPONS.pistol.maxReserveAmmo) {
+        p.reserve = WEAPONS.pistol.maxReserveAmmo;
+        bought = true;
+      }
+    }
+    return bought;
+  }
+
+  public buyWeapon(weaponType: WeaponType): boolean {
+    this.setWeapon(weaponType, true);
+    if (weaponType === 'ak47') {
+      this.ammoState.ak47.mag = WEAPONS.ak47.magSize;
+      this.ammoState.ak47.reserve = WEAPONS.ak47.maxReserveAmmo;
+    } else if (weaponType === 'pistol') {
+      this.ammoState.pistol.mag = WEAPONS.pistol.magSize;
+      this.ammoState.pistol.reserve = WEAPONS.pistol.maxReserveAmmo;
+    }
+    return true;
+  }
+
+  public setGodMode(enabled: boolean) {
+    this.isGodMode = enabled;
+    if (enabled) {
+      this.isReloading = false;
+      this.ammoState.ak47.mag = WEAPONS.ak47.magSize;
+      this.ammoState.ak47.reserve = 999;
+      this.ammoState.pistol.mag = WEAPONS.pistol.magSize;
+      this.ammoState.pistol.reserve = 999;
+    }
   }
 
   public reloadWeapon() {
-    if (this.currentWeapon === 'knife') return;
+    if (this.currentWeapon === 'knife' || this.isGodMode) return;
     if (this.isReloading || !this.isAlive) return;
 
     const wData = WEAPONS[this.currentWeapon];
@@ -1089,51 +1108,36 @@ export class FPSGameEngine {
     if (now - this.lastFireTime < wData.fireRate) return;
 
     const ammo = this.ammoState[this.currentWeapon];
-    if (ammo.mag <= 0) {
+    if (!this.isGodMode && ammo.mag <= 0) {
       this.reloadWeapon();
       return;
     }
 
     this.lastFireTime = now;
-    ammo.mag--;
-    this.sprayCount++;
-
-    // Play gunshot sound per weapon
-    if (wData.id === 'ak47') sounds.playAK47Shot();
-    else if (wData.id === 'm4a4') sounds.playM4A4Shot();
-    else if (wData.id === 'awp') sounds.playAWPShot();
-    else if (wData.id === 'mp9') sounds.playSMGShot();
-    else if (wData.id === 'shotgun') sounds.playAWPShot();
-    else if (wData.id === 'pistol' || wData.id === 'glock') sounds.playPistolShot();
-
-    // CS Recoil Kick
-    // Crouching reduces recoil kick by 30%
-    const recoilScale = this.isCrouching ? 0.70 : 1.0;
-    const burstMod = Math.min(1.35, 0.75 + this.sprayCount * 0.08);
-    this.recoilPitch += wData.recoilKick * recoilScale * burstMod;
-
-    // Horizontal spray weave (CS spray pattern)
-    let horizKick = 0;
-    if (this.sprayCount > 3) {
-      const sprayCycle = Math.sin(this.sprayCount * 0.75);
-      horizKick = sprayCycle * (wData.recoilKick * 0.45 * recoilScale);
+    if (!this.isGodMode) {
+      ammo.mag--;
     } else {
-      horizKick = (Math.random() - 0.5) * (wData.recoilKick * 0.25 * recoilScale);
+      // Keep magazine full in godmode
+      ammo.mag = wData.magSize;
     }
-    this.recoilYaw += horizKick;
+
+    // Play gunshot sound
+    if (wData.id === 'ak47') sounds.playAK47Shot();
+    else if (wData.id === 'pistol') sounds.playPistolShot();
+
+    // Recoil Kick
+    this.recoilPitch += wData.recoilKick;
+    this.recoilYaw += (Math.random() - 0.5) * (wData.recoilKick * 0.5);
 
     // Muzzle Flash effect
     this.triggerMuzzleFlash();
 
-    // Pellets: shotgun fires multiple pellets; standard rifles fire 1
-    const pellets = wData.pellets || 1;
-    for (let p = 0; p < pellets; p++) {
-      this.performGunRaycast(wData);
-    }
+    // Raycast hit detection for bullets
+    this.performGunRaycast(wData);
 
     // Broadcast shoot to WS
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      const activeRig = (wData.slot === 2) ? this.pistolRig : this.ak47Rig;
+      const activeRig = this.currentWeapon === 'ak47' ? this.ak47Rig : this.pistolRig;
       const muzzleWorld = new THREE.Vector3();
       activeRig.muzzlePoint.getWorldPosition(muzzleWorld);
       const dir = new THREE.Vector3();
@@ -1202,7 +1206,22 @@ export class FPSGameEngine {
         this.createBloodParticles(hit.point);
 
         // Flash Hitmarker
-        this.pushHUD(true);
+        this.callbacks.onHUDUpdate({
+          health: this.health,
+          armor: this.armor,
+          ammo: 1,
+          reserveAmmo: 0,
+          weapon: 'knife',
+          isReloading: false,
+          redScore: this.redScore,
+          blueScore: this.blueScore,
+          round: this.currentRound,
+          timeLeft: this.roundTimeLeft,
+          isLocked: this.isPointerLocked,
+          hitMarker: true,
+          isDead: !this.isAlive,
+          respawnTimer: this.respawnTimer
+        });
 
         // Apply damage to bot or remote player
         const hitPlayerId = hitObj.userData?.playerId;
@@ -1210,6 +1229,26 @@ export class FPSGameEngine {
           const killed = this.botManager.applyDamage(hitPlayerId, damage, isHead, this.localPlayerId);
           if (killed) {
             const bot = this.botManager.getBot(hitPlayerId)!;
+            if (isHead) {
+              this.triggerHeadshotFeedback();
+              this.callbacks.onHUDUpdate({
+                health: this.health,
+                armor: this.armor,
+                ammo: 1,
+                reserveAmmo: 0,
+                weapon: 'knife',
+                isReloading: false,
+                redScore: this.redScore,
+                blueScore: this.blueScore,
+                round: this.currentRound,
+                timeLeft: this.roundTimeLeft,
+                isLocked: this.isPointerLocked,
+                hitMarker: true,
+                isDead: !this.isAlive,
+                respawnTimer: this.respawnTimer,
+                headshotKill: true
+              });
+            }
             this.callbacks.onKillFeed({
               id: 'kf_' + Math.random(),
               killerName: this.playerName,
@@ -1281,29 +1320,11 @@ export class FPSGameEngine {
   private performGunRaycast(wData: typeof WEAPONS[WeaponType]) {
     const raycaster = new THREE.Raycaster();
 
-    // Spread calculation: Crouching gives 35% accuracy boost; moving & jumping add realistic CS spread penalties
-    let spreadMult = this.isCrouching ? 0.65 : 1.0;
-    const horizSpeed = Math.hypot(this.playerVelocity.x, this.playerVelocity.z);
-    if (!this.isGrounded) {
-      spreadMult *= 2.8;
-    } else if (horizSpeed > 1.2) {
-      spreadMult *= 1.8;
-    }
+    // Spread calculation
+    const spread = (Math.random() - 0.5) * wData.spread;
+    const spreadY = (Math.random() - 0.5) * wData.spread;
 
-    // AWP sniper rifle precision: pinpoint accurate when scoped, heavily inaccurate when hip-firing
-    if (wData.isSniper) {
-      if (this.isSniperScoped && horizSpeed < 0.8) {
-        spreadMult = 0.04;
-      } else {
-        spreadMult = 3.5;
-      }
-    }
-
-    const sprayClimb = Math.min(0.045, this.sprayCount * 0.0028);
-    const spreadX = (Math.random() - 0.5) * wData.spread * spreadMult;
-    const spreadY = (Math.random() - 0.5) * wData.spread * spreadMult + sprayClimb;
-
-    const screenCenter = new THREE.Vector2(spreadX, spreadY);
+    const screenCenter = new THREE.Vector2(spread, spreadY);
     raycaster.setFromCamera(screenCenter, this.camera);
     raycaster.far = wData.range;
 
@@ -1333,8 +1354,8 @@ export class FPSGameEngine {
 
     const intersects = raycaster.intersectObjects(hitCandidates, true);
 
-    // Tip of the gun barrel position
-    const activeRig = (wData.slot === 2) ? this.pistolRig : this.ak47Rig;
+    // EXACT 3D world position of the tip of the gun barrel
+    const activeRig = this.currentWeapon === 'ak47' ? this.ak47Rig : this.pistolRig;
     const muzzleWorld = new THREE.Vector3();
     activeRig.muzzlePoint.getWorldPosition(muzzleWorld);
 
@@ -1355,7 +1376,22 @@ export class FPSGameEngine {
         else sounds.playHitmarker();
 
         // Flash Hitmarker on HUD
-        this.pushHUD(true);
+        this.callbacks.onHUDUpdate({
+          health: this.health,
+          armor: this.armor,
+          ammo: this.ammoState[this.currentWeapon].mag,
+          reserveAmmo: this.ammoState[this.currentWeapon].reserve,
+          weapon: this.currentWeapon,
+          isReloading: this.isReloading,
+          redScore: this.redScore,
+          blueScore: this.blueScore,
+          round: this.currentRound,
+          timeLeft: this.roundTimeLeft,
+          isLocked: this.isPointerLocked,
+          hitMarker: true,
+          isDead: !this.isAlive,
+          respawnTimer: this.respawnTimer
+        });
 
         // Apply to Bot or Remote Player
         const hitPlayerId = hitObj.userData?.playerId;
@@ -1363,9 +1399,26 @@ export class FPSGameEngine {
           const killed = this.botManager.applyDamage(hitPlayerId, damage, isHeadshot, this.localPlayerId);
           if (killed) {
             const bot = this.botManager.getBot(hitPlayerId)!;
-            const killReward = wData.id === 'knife' ? 1500 : wData.id === 'shotgun' ? 900 : wData.id === 'mp9' ? 600 : 300;
-            this.money = Math.min(16000, this.money + killReward);
-
+            if (isHeadshot) {
+              this.triggerHeadshotFeedback();
+              this.callbacks.onHUDUpdate({
+                health: this.health,
+                armor: this.armor,
+                ammo: this.ammoState[this.currentWeapon].mag,
+                reserveAmmo: this.ammoState[this.currentWeapon].reserve,
+                weapon: this.currentWeapon,
+                isReloading: this.isReloading,
+                redScore: this.redScore,
+                blueScore: this.blueScore,
+                round: this.currentRound,
+                timeLeft: this.roundTimeLeft,
+                isLocked: this.isPointerLocked,
+                hitMarker: true,
+                isDead: !this.isAlive,
+                respawnTimer: this.respawnTimer,
+                headshotKill: true
+              });
+            }
             this.callbacks.onKillFeed({
               id: 'kf_' + Math.random(),
               killerName: this.playerName,
@@ -1380,7 +1433,6 @@ export class FPSGameEngine {
             if (!this.isOnlineMode) {
               this.checkOfflineRoundWin();
             }
-            this.pushHUD();
           }
         } else if (hitPlayerId && this.remotePlayers.has(hitPlayerId)) {
           const rp = this.remotePlayers.get(hitPlayerId)!;
@@ -1411,50 +1463,44 @@ export class FPSGameEngine {
     }
   }
 
-  // Refined CS-style high-velocity sleek bullet tracer (sharp, thin, laser-fast)
   private createBulletTracer(from: THREE.Vector3, to: THREE.Vector3, _dist: number) {
     const group = new THREE.Group();
-    const fullDir = to.clone().sub(from);
-    const fullLength = fullDir.length();
-    if (fullLength < 0.2) return;
 
-    const dirNorm = fullDir.clone().normalize();
-    // Offset slightly forward from muzzle so tracer doesn't clip directly into the player's face
-    const startPoint = from.clone().add(dirNorm.clone().multiplyScalar(0.4));
-    const tracerLength = Math.min(fullLength - 0.4, 6.0); // authentic 6m streak length
-    const endPoint = startPoint.clone().add(dirNorm.clone().multiplyScalar(tracerLength));
-
-    // 1. Sleek glowing core line
-    const points = [startPoint, endPoint];
+    // 1. High-intensity neon tracer core line
+    const points = [from, to];
     const lineGeo = new THREE.BufferGeometry().setFromPoints(points);
     const lineMat = new THREE.LineBasicMaterial({
-      color: 0xfff3a8,
+      color: 0xfff4b0,
+      linewidth: 3,
       transparent: true,
-      opacity: 0.9
+      opacity: 0.95
     });
     const line = new THREE.Line(lineGeo, lineMat);
     group.add(line);
 
-    // 2. High-speed razor-thin needle tracer beam (1.2mm radius, sleek aerodynamic taper)
-    const tracerRadius = 0.0012; // 1.2mm realistic bullet tracer width
-    const cylinderGeo = new THREE.CylinderGeometry(tracerRadius * 0.4, tracerRadius, tracerLength, 6);
-    cylinderGeo.rotateX(Math.PI / 2);
-    cylinderGeo.translate(0, 0, tracerLength / 2);
+    // 2. Volumetric Glowing Tracer Beam Cylinder (visible in 3D from all angles)
+    const dir = to.clone().sub(from);
+    const length = dir.length();
+    if (length > 0.1) {
+      const cylinderGeo = new THREE.CylinderGeometry(0.016, 0.016, length, 8);
+      cylinderGeo.rotateX(Math.PI / 2);
+      cylinderGeo.translate(0, 0, length / 2);
 
-    const cylinderMat = new THREE.MeshBasicMaterial({
-      color: 0xffaa2b,
-      transparent: true,
-      opacity: 0.75,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false
-    });
-    const cylinderMesh = new THREE.Mesh(cylinderGeo, cylinderMat);
-    cylinderMesh.position.copy(startPoint);
-    cylinderMesh.lookAt(endPoint);
-    group.add(cylinderMesh);
+      const cylinderMat = new THREE.MeshBasicMaterial({
+        color: 0xffaa22,
+        transparent: true,
+        opacity: 0.65,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
+      });
+      const cylinderMesh = new THREE.Mesh(cylinderGeo, cylinderMat);
+      cylinderMesh.position.copy(from);
+      cylinderMesh.lookAt(to);
+      group.add(cylinderMesh);
+    }
 
     this.scene.add(group);
-    this.bulletTracers.push({ obj: group, expire: performance.now() + 40 });
+    this.bulletTracers.push({ obj: group, expire: performance.now() + 75 });
   }
 
   private createBulletHole(pos: THREE.Vector3, normal: THREE.Vector3) {
@@ -1654,49 +1700,37 @@ export class FPSGameEngine {
     }
   }
 
-  public takeDamage(amount: number, isHeadshot: boolean, attackerName: string) {
+  public takeDamage(amount: number, _isHeadshot: boolean, _attackerName: string) {
     if (!this.isAlive) return;
 
-    let healthDmg = amount;
-    let armorDmg = 0;
+    // 50% damage reduction for longer tactical gunfights and survivability
+    const mitigatedDamage = Math.max(1, Math.round(amount * 0.5));
 
+    // CS:GO Kevlar Armor absorption: absorbs 50% of the damage
     if (this.armor > 0) {
-      if (isHeadshot && this.hasHelmet) {
-        // Helmet protects head against instant 1-tap kills for low calibre weapons
-        healthDmg = Math.round(amount * 0.5);
-        armorDmg = Math.round(amount * 0.5);
-      } else {
-        // Standard CS armor absorption (~72% health, 28% armor absorb)
-        healthDmg = Math.max(1, Math.round(amount * 0.72));
-        armorDmg = Math.max(0, Math.round(amount * 0.28));
-      }
-      this.armor = Math.max(0, this.armor - armorDmg);
+      const armorAbsorb = Math.min(this.armor, Math.ceil(mitigatedDamage * 0.5));
+      const healthDamage = mitigatedDamage - armorAbsorb;
+      this.armor = Math.max(0, this.armor - armorAbsorb);
+      this.health = Math.max(0, this.health - healthDamage);
+    } else {
+      this.health = Math.max(0, this.health - mitigatedDamage);
     }
 
-    this.health = Math.max(0, this.health - healthDmg);
     sounds.playPlayerHurt();
 
-    // Camera flinch
+    // Camera flinch (moderate so aiming is not completely ruined)
     this.pitch += 0.025;
     this.yaw += (Math.random() - 0.5) * 0.03;
-    this.pushHUD();
 
     if (this.health === 0) {
-      this.handlePlayerDeath(attackerName);
+      this.handlePlayerDeath(_attackerName);
     }
   }
 
   private handlePlayerDeath(_killerName: string) {
     this.isAlive = false;
     this.respawnTimer = 3.5;
-    this.isSniperScoped = false;
-    this.camera.fov = this.settings.fov || 75;
-    this.camera.updateProjectionMatrix();
     sounds.playDefeatSound();
-
-    // Loss reward compensation when dying
-    this.money = Math.min(16000, this.money + 1400);
-    this.pushHUD();
 
     if (!this.isOnlineMode) {
       setTimeout(() => {
@@ -1710,17 +1744,8 @@ export class FPSGameEngine {
     this.armor = 100;
     this.isAlive = true;
     this.respawnTimer = 0;
-    this.isSniperScoped = false;
-    this.camera.fov = this.settings.fov || 75;
-    this.camera.updateProjectionMatrix();
-
-    // Refill magazines for current loadout
-    (Object.keys(this.ammoState) as WeaponType[]).forEach((k) => {
-      const w = WEAPONS[k];
-      if (w) {
-        this.ammoState[k].mag = w.magSize;
-      }
-    });
+    this.ammoState.ak47.mag = 30;
+    this.ammoState.pistol.mag = 12;
 
     const spawnList = this.mapData.spawns[this.team];
     const mySpawn = spawnList[this.slot % spawnList.length] || spawnList[0];
@@ -1728,7 +1753,6 @@ export class FPSGameEngine {
     this.yaw = mySpawn.rotY;
     this.pitch = 0;
     this.playerVelocity.set(0, 0, 0);
-    this.pushHUD();
   }
 
   private checkOfflineRoundWin() {
@@ -1759,14 +1783,8 @@ export class FPSGameEngine {
   private triggerRoundEnd(winner: Team | 'draw', message: string) {
     this.roundEnded = true;
     const playerWon = winner === this.team;
-    if (playerWon) {
-      sounds.playWinSound();
-      this.money = Math.min(16000, this.money + 3250);
-    } else {
-      sounds.playDefeatSound();
-      this.money = Math.min(16000, this.money + 1400);
-    }
-    this.pushHUD();
+    if (playerWon) sounds.playWinSound();
+    else sounds.playDefeatSound();
 
     this.callbacks.onRoundStatus({
       show: true,
@@ -1800,17 +1818,16 @@ export class FPSGameEngine {
     this.currentEyeHeight = THREE.MathUtils.lerp(this.currentEyeHeight, targetEyeHeight, Math.min(1, delta * 14));
     const eyeHeight = this.currentEyeHeight;
 
-    // 2. Camera look vectors (projected horizontally onto ground plane)
-    const forward = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw)).normalize();
-    const right = new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw)).normalize();
+    // 2. Camera look vectors
+    const forward = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
+    const right = new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
 
     // 3. Desired move direction
     const wishDir = new THREE.Vector3();
-    if (this.moveForward && !this.moveBackward) wishDir.add(forward);
-    else if (this.moveBackward && !this.moveForward) wishDir.sub(forward);
-
-    if (this.moveRight && !this.moveLeft) wishDir.add(right);
-    else if (this.moveLeft && !this.moveRight) wishDir.sub(right);
+    if (this.moveForward) wishDir.add(forward);
+    if (this.moveBackward) wishDir.sub(forward);
+    if (this.moveRight) wishDir.add(right);
+    if (this.moveLeft) wishDir.sub(right);
 
     const isMoving = wishDir.lengthSq() > 0.001;
     if (isMoving) {
@@ -1818,53 +1835,65 @@ export class FPSGameEngine {
     }
 
     // 4. Dynamic speeds
-    let wishSpeed = 7.0; // m/s (~250 units/s CS speed)
-    if (this.isCrouching) wishSpeed = 3.5;
-    else if (this.isWalking) wishSpeed = 4.5;
+    let wishSpeed = 6.8; // m/s
+    if (this.isCrouching) wishSpeed = 3.2;
+    else if (this.isWalking) wishSpeed = 4.2;
 
     // Tactical knife agility boost (+8%)
     if (this.currentWeapon === 'knife' && !this.isCrouching) {
       wishSpeed *= 1.08;
     }
 
-    // 5. Ground Movement, Responsive Acceleration & Counter-Strafing Friction
+    // 5. Ground Friction & Acceleration
     if (this.isGrounded) {
-      if (!isMoving) {
-        // Fast counter-strafing stop
-        const horizSpeed = Math.hypot(this.playerVelocity.x, this.playerVelocity.z);
-        if (horizSpeed > 0.01) {
-          const friction = 14.0;
-          const drop = horizSpeed * friction * delta;
-          const newSpeed = Math.max(0, horizSpeed - drop);
-          const ratio = newSpeed / horizSpeed;
-          this.playerVelocity.x *= ratio;
-          this.playerVelocity.z *= ratio;
-        } else {
+      const horizSpeed = Math.hypot(this.playerVelocity.x, this.playerVelocity.z);
+      if (horizSpeed > 0.001) {
+        // High responsive stopping friction when keys are released
+        const friction = isMoving ? 8.5 : 20.0;
+        const drop = horizSpeed * friction * delta;
+        const newSpeed = Math.max(0, horizSpeed - drop);
+        const ratio = newSpeed / horizSpeed;
+        this.playerVelocity.x *= ratio;
+        this.playerVelocity.z *= ratio;
+        if (!isMoving && newSpeed < 0.06) {
           this.playerVelocity.x = 0;
           this.playerVelocity.z = 0;
         }
-      } else {
-        // Instant responsive CS acceleration towards wishDir
-        const targetVx = wishDir.x * wishSpeed;
-        const targetVz = wishDir.z * wishSpeed;
-        const accelRate = 22.0;
-        this.playerVelocity.x = THREE.MathUtils.lerp(this.playerVelocity.x, targetVx, Math.min(1, delta * accelRate));
-        this.playerVelocity.z = THREE.MathUtils.lerp(this.playerVelocity.z, targetVz, Math.min(1, delta * accelRate));
+      }
+
+      // Responsive ground acceleration towards wishDir
+      const curSpeed = this.playerVelocity.x * wishDir.x + this.playerVelocity.z * wishDir.z;
+      const addSpeed = wishSpeed - curSpeed;
+      if (addSpeed > 0 && isMoving) {
+        const accelSpeed = Math.min(addSpeed, 48 * delta * wishSpeed);
+        this.playerVelocity.x += accelSpeed * wishDir.x;
+        this.playerVelocity.z += accelSpeed * wishDir.z;
       }
     } else {
-      // Fluid CS air strafing
-      if (isMoving) {
-        const airSpeed = wishSpeed * 0.65;
-        const targetAirVx = wishDir.x * airSpeed;
-        const targetAirVz = wishDir.z * airSpeed;
-        this.playerVelocity.x = THREE.MathUtils.lerp(this.playerVelocity.x, targetAirVx, Math.min(1, delta * 4.5));
-        this.playerVelocity.z = THREE.MathUtils.lerp(this.playerVelocity.z, targetAirVz, Math.min(1, delta * 4.5));
+      // Fluid CS air strafing / control
+      const airWishSpeed = Math.min(wishSpeed, 3.2);
+      const curAirSpeed = this.playerVelocity.x * wishDir.x + this.playerVelocity.z * wishDir.z;
+      const addSpeed = airWishSpeed - curAirSpeed;
+      if (addSpeed > 0 && isMoving) {
+        const airAccelSpeed = Math.min(addSpeed, 26 * delta * airWishSpeed);
+        this.playerVelocity.x += airAccelSpeed * wishDir.x;
+        this.playerVelocity.z += airAccelSpeed * wishDir.z;
       }
-      this.playerVelocity.x *= (1 - 0.3 * delta);
-      this.playerVelocity.z *= (1 - 0.3 * delta);
+
+      // Gentle air drag
+      this.playerVelocity.x *= (1 - 0.4 * delta);
+      this.playerVelocity.z *= (1 - 0.4 * delta);
     }
 
-    // 6. Jump buffering (Coyote time)
+    // 6. Clamp horizontal speed
+    const maxSpeed = wishSpeed * 1.15;
+    const currentHoriz = Math.hypot(this.playerVelocity.x, this.playerVelocity.z);
+    if (currentHoriz > maxSpeed) {
+      this.playerVelocity.x = (this.playerVelocity.x / currentHoriz) * maxSpeed;
+      this.playerVelocity.z = (this.playerVelocity.z / currentHoriz) * maxSpeed;
+    }
+
+    // 7. Jump buffering (Coyote time)
     if (this.jumpBufferTimer > 0) {
       this.jumpBufferTimer -= delta;
       if (this.isGrounded) {
@@ -1874,14 +1903,14 @@ export class FPSGameEngine {
       }
     }
 
-    // 7. Gravity
+    // 8. Gravity
     this.playerVelocity.y -= 19.6 * delta;
 
-    // 8. 3D Swept collision & sliding
+    // 9. Auto-step collision check
     const radius = 0.42;
     this.moveWithCollisions(delta, radius, eyeHeight);
 
-    // 9. Footstep sounds (silent when walking or crouching)
+    // 10. Footstep sounds (silent when tactical walking or crouching)
     if (isMoving && this.isGrounded && !this.isWalking && !this.isCrouching) {
       this.stepTimer += delta;
       if (this.stepTimer >= 0.33) {
@@ -1892,7 +1921,7 @@ export class FPSGameEngine {
       this.stepTimer = 0.2;
     }
 
-    // 10. Head bobbing calculation
+    // 11. Head bobbing calculation (subtle and smooth)
     if (isMoving && this.isGrounded) {
       const bobFreq = this.isCrouching ? 7 : (this.isWalking ? 8 : 12);
       this.bobTimer += delta * bobFreq;
@@ -1900,129 +1929,85 @@ export class FPSGameEngine {
       this.bobTimer = THREE.MathUtils.lerp(this.bobTimer, 0, delta * 6);
     }
 
-    // 11. Strafe camera roll tilt (-1 deg to +1 deg)
+    // 12. Strafe camera roll tilt (-1 deg to +1 deg)
     let targetRoll = 0;
     if (this.moveLeft) targetRoll += 0.016;
     if (this.moveRight) targetRoll -= 0.016;
     this.cameraRoll = THREE.MathUtils.lerp(this.cameraRoll, targetRoll, delta * 10);
   }
 
-  // 3D Swept AABB with Wall Sliding and Auto-Stepping
+  // Smooth sliding collision with auto-step climbing (glides over curbs, stairs and crate lips)
   private moveWithCollisions(delta: number, radius: number, eyeHeight: number) {
     const feetY = this.playerPos.y - eyeHeight;
     const headY = this.playerPos.y + 0.2;
-    const stepHeight = 0.35; // Maximum curb / crate step height
+    const stepHeight = 0.36; // Maximum curb / step height player can walk up
 
-    // 1. Horizontal Swept Sliding Move (2 iterations for smooth corner sliding)
-    let moveX = this.playerVelocity.x * delta;
-    let moveZ = this.playerVelocity.z * delta;
+    // 1. Move X & check collision with auto-step
+    this.playerPos.x += this.playerVelocity.x * delta;
 
-    for (let iter = 0; iter < 2; iter++) {
-      if (Math.abs(moveX) < 0.00001 && Math.abs(moveZ) < 0.00001) break;
-
-      let earliestTime = 1.0;
-      let hitNormalX = 0;
-      let hitNormalZ = 0;
-      let hitBox: CollisionBox | null = null;
-
-      const px = this.playerPos.x;
-      const pz = this.playerPos.z;
-
-      for (const b of this.mapData.colliders) {
-        if (headY <= b.minY || feetY >= b.maxY) continue;
-
-        const boxMinX = b.minX - radius;
-        const boxMaxX = b.maxX + radius;
-        const boxMinZ = b.minZ - radius;
-        const boxMaxZ = b.maxZ + radius;
-
-        let tEnterX = -Infinity;
-        let tExitX = Infinity;
-        let nX = 0;
-
-        if (moveX > 0) {
-          tEnterX = (boxMinX - px) / moveX;
-          tExitX = (boxMaxX - px) / moveX;
-          nX = -1;
-        } else if (moveX < 0) {
-          tEnterX = (boxMaxX - px) / moveX;
-          tExitX = (boxMinX - px) / moveX;
-          nX = 1;
-        } else {
-          if (px <= boxMinX || px >= boxMaxX) continue;
-        }
-
-        let tEnterZ = -Infinity;
-        let tExitZ = Infinity;
-        let nZ = 0;
-
-        if (moveZ > 0) {
-          tEnterZ = (boxMinZ - pz) / moveZ;
-          tExitZ = (boxMaxZ - pz) / moveZ;
-          nZ = -1;
-        } else if (moveZ < 0) {
-          tEnterZ = (boxMaxZ - pz) / moveZ;
-          tExitZ = (boxMinZ - pz) / moveZ;
-          nZ = 1;
-        } else {
-          if (pz <= boxMinZ || pz >= boxMaxZ) continue;
-        }
-
-        const tEntry = Math.max(tEnterX, tEnterZ);
-        const tExit = Math.min(tExitX, tExitZ);
-
-        if (tEntry <= tExit && tEntry >= 0 && tEntry < earliestTime && tExit > 0) {
-          earliestTime = tEntry;
-          hitBox = b;
-          if (tEnterX > tEnterZ) {
-            hitNormalX = nX;
-            hitNormalZ = 0;
+    for (const b of this.mapData.colliders) {
+      if (headY > b.minY && feetY < b.maxY) {
+        if (
+          this.playerPos.x + radius > b.minX &&
+          this.playerPos.x - radius < b.maxX &&
+          this.playerPos.z + radius > b.minZ &&
+          this.playerPos.z - radius < b.maxZ
+        ) {
+          // Check if this obstacle is low enough to step onto (e.g. ramp step or curb)
+          const obstacleStep = b.maxY - feetY;
+          if (obstacleStep > 0 && obstacleStep <= stepHeight && this.playerVelocity.y <= 0) {
+            // Step up smoothly onto obstacle top
+            this.playerPos.y = Math.max(this.playerPos.y, b.maxY + eyeHeight);
+            this.isGrounded = true;
           } else {
-            hitNormalX = 0;
-            hitNormalZ = nZ;
+            // Tall obstacle: slide along wall smoothly without sticking
+            const midX = (b.minX + b.maxX) / 2;
+            if (this.playerVelocity.x > 0 || (this.playerVelocity.x === 0 && this.playerPos.x < midX)) {
+              this.playerPos.x = b.minX - radius - 0.002;
+            } else {
+              this.playerPos.x = b.maxX + radius + 0.002;
+            }
+            this.playerVelocity.x = 0;
           }
         }
       }
+    }
 
-      if (hitBox && earliestTime < 1.0) {
-        // Auto-step climbing
-        const stepH = hitBox.maxY - feetY;
-        if (stepH > 0 && stepH <= stepHeight && this.playerVelocity.y <= 0.1) {
-          this.playerPos.y = Math.max(this.playerPos.y, hitBox.maxY + eyeHeight);
-          this.isGrounded = true;
-          this.playerPos.x += moveX;
-          this.playerPos.z += moveZ;
-          break;
+    // 2. Move Z & check collision with auto-step
+    this.playerPos.z += this.playerVelocity.z * delta;
+
+    for (const b of this.mapData.colliders) {
+      if (headY > b.minY && feetY < b.maxY) {
+        if (
+          this.playerPos.x + radius > b.minX &&
+          this.playerPos.x - radius < b.maxX &&
+          this.playerPos.z + radius > b.minZ &&
+          this.playerPos.z - radius < b.maxZ
+        ) {
+          // Check if obstacle is low enough to step onto
+          const obstacleStep = b.maxY - feetY;
+          if (obstacleStep > 0 && obstacleStep <= stepHeight && this.playerVelocity.y <= 0) {
+            this.playerPos.y = Math.max(this.playerPos.y, b.maxY + eyeHeight);
+            this.isGrounded = true;
+          } else {
+            // Tall obstacle: slide along wall smoothly without sticking
+            const midZ = (b.minZ + b.maxZ) / 2;
+            if (this.playerVelocity.z > 0 || (this.playerVelocity.z === 0 && this.playerPos.z < midZ)) {
+              this.playerPos.z = b.minZ - radius - 0.002;
+            } else {
+              this.playerPos.z = b.maxZ + radius + 0.002;
+            }
+            this.playerVelocity.z = 0;
+          }
         }
-
-        // Move up to the impact point
-        const moveFrac = Math.max(0, earliestTime - 0.0005);
-        this.playerPos.x += moveX * moveFrac;
-        this.playerPos.z += moveZ * moveFrac;
-
-        // Eliminate velocity component into the wall
-        if (hitNormalX !== 0) {
-          this.playerVelocity.x = 0;
-        }
-        if (hitNormalZ !== 0) {
-          this.playerVelocity.z = 0;
-        }
-
-        // Prepare remaining slide vector for second iteration
-        const remainingTime = 1.0 - earliestTime;
-        moveX = this.playerVelocity.x * delta * remainingTime;
-        moveZ = this.playerVelocity.z * delta * remainingTime;
-      } else {
-        this.playerPos.x += moveX;
-        this.playerPos.z += moveZ;
-        break;
       }
     }
 
-    // 2. Vertical Movement & Ground Check
+    // 3. Move Y
     this.playerPos.y += this.playerVelocity.y * delta;
-    let groundY = eyeHeight;
 
+    // Ground check: check main floor (y = 0) and any elevated platforms under feet
+    let groundY = eyeHeight;
     for (const box of this.mapData.colliders) {
       if (
         this.playerPos.x + radius > box.minX &&
@@ -2031,7 +2016,8 @@ export class FPSGameEngine {
         this.playerPos.z - radius < box.maxZ
       ) {
         const topY = box.maxY + eyeHeight;
-        if (this.playerPos.y >= topY - 0.45 && this.playerPos.y <= topY + 0.5 && this.playerVelocity.y <= 0.1) {
+        // If player is on or just above this box top
+        if (this.playerPos.y >= topY - 0.4 && this.playerPos.y <= topY + 0.45 && this.playerVelocity.y <= 0) {
           if (topY > groundY) {
             groundY = topY;
           }
@@ -2063,14 +2049,27 @@ export class FPSGameEngine {
     const targetPitch = this.pitch + this.recoilPitch;
     const targetYaw = this.yaw + this.recoilYaw;
 
-    // Smoothly recover recoil
+    // Smoothly recover recoil & camera roll
     this.recoilPitch = THREE.MathUtils.lerp(this.recoilPitch, 0, delta * 14);
     this.recoilYaw = THREE.MathUtils.lerp(this.recoilYaw, 0, delta * 14);
+    this.cameraRoll = THREE.MathUtils.lerp(this.cameraRoll, 0, delta * 12);
+
+    // Screen shake trauma decay & offset calculation (for headshot impact)
+    let shakePitch = 0;
+    let shakeYaw = 0;
+    let shakeRoll = 0;
+    if (this.screenShakeTrauma > 0.001) {
+      this.screenShakeTrauma = Math.max(0, this.screenShakeTrauma - delta * 2.8);
+      const shakePower = Math.pow(this.screenShakeTrauma, 2);
+      shakePitch = (Math.random() - 0.5) * 0.045 * shakePower;
+      shakeYaw = (Math.random() - 0.5) * 0.045 * shakePower;
+      shakeRoll = (Math.random() - 0.5) * 0.03 * shakePower;
+    }
 
     this.camera.rotation.order = 'YXZ';
-    this.camera.rotation.y = targetYaw;
-    this.camera.rotation.x = targetPitch;
-    this.camera.rotation.z = this.cameraRoll;
+    this.camera.rotation.y = targetYaw + shakeYaw;
+    this.camera.rotation.x = targetPitch + shakePitch;
+    this.camera.rotation.z = this.cameraRoll + shakeRoll;
 
     // Bobbing offset
     const bobX = Math.cos(this.bobTimer) * 0.02;
@@ -2326,8 +2325,8 @@ export class FPSGameEngine {
     this.callbacks.onHUDUpdate({
       health: this.health,
       armor: this.armor,
-      ammo: this.ammoState[this.currentWeapon]?.mag || 0,
-      reserveAmmo: this.ammoState[this.currentWeapon]?.reserve || 0,
+      ammo: this.ammoState[this.currentWeapon].mag,
+      reserveAmmo: this.ammoState[this.currentWeapon].reserve,
       weapon: this.currentWeapon,
       isReloading: this.isReloading,
       redScore: this.redScore,
@@ -2337,11 +2336,7 @@ export class FPSGameEngine {
       isLocked: this.isPointerLocked,
       hitMarker: false,
       isDead: !this.isAlive,
-      respawnTimer: Math.ceil(this.respawnTimer),
-      money: this.money,
-      inBuyZone: this.isInBuyZone(),
-      isBuyMenuOpen: this.isBuyMenuOpen,
-      isScoped: this.isSniperScoped
+      respawnTimer: Math.ceil(this.respawnTimer)
     });
 
     // 13. Render 3D Scene

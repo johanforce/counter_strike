@@ -11,7 +11,8 @@ import {
   KillFeedEvent,
   GameSettings,
   BotDifficulty,
-  RoomState
+  RoomState,
+  ChatMessage
 } from './types/game';
 import { FPSGameEngine } from './game/engine';
 import { HUD } from './components/HUD';
@@ -19,7 +20,7 @@ import { Lobby } from './components/Lobby';
 import { Scoreboard } from './components/Scoreboard';
 import { SettingsModal } from './components/SettingsModal';
 import { WaitingRoom } from './components/WaitingRoom';
-import { BuyMenu } from './components/BuyMenu';
+import { sounds } from './game/audio';
 
 interface GameConfig {
   playerName: string;
@@ -89,15 +90,15 @@ export default function App() {
     message: string;
   }>({ show: false, message: '' });
 
-  // Buy Menu & Economy States
-  const [money, setMoney] = useState<number>(16000);
-  const [inBuyZone, setInBuyZone] = useState<boolean>(true);
-  const [isBuyMenuOpen, setIsBuyMenuOpen] = useState<boolean>(false);
-  const [isScoped, setIsScoped] = useState<boolean>(false);
-  const [hasHelmet, setHasHelmet] = useState<boolean>(true);
-
   // Scoreboard Tab Key
   const [isScoreboardOpen, setIsScoreboardOpen] = useState<boolean>(false);
+
+  // Economy Money State (CS Currency)
+  const [money, setMoney] = useState<number>(800);
+  const [isGodMode, setIsGodMode] = useState<boolean>(false);
+
+  // In-Game Tactical Chat Messages (Fresh per room/session)
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
 
   // Canvas container ref
   const canvasContainerRef = useRef<HTMLDivElement | null>(null);
@@ -105,6 +106,9 @@ export default function App() {
 
   // Start game session from Lobby
   const handleStartGame = (config: GameConfig) => {
+    setChatMessages([]);
+    setMoney(800);
+    setIsGodMode(false);
     setGameConfig(config);
     if (config.isOnline) {
       setScreen('waiting');
@@ -201,6 +205,9 @@ export default function App() {
       wsRef.current = null;
     }
     setRoomState(null);
+    setChatMessages([]);
+    setMoney(800);
+    setIsGodMode(false);
     setScreen('lobby');
   };
 
@@ -235,7 +242,7 @@ export default function App() {
   useEffect(() => {
     if (screen !== 'playing' || !canvasContainerRef.current || !gameConfig) return;
 
-    // Reset scores & HUD
+    // Reset scores & HUD & clean fresh room session
     setHealth(100);
     setArmor(100);
     setAmmo(30);
@@ -248,6 +255,9 @@ export default function App() {
     setTimeLeft(90);
     setIsDead(false);
     setKillFeed([]);
+    setChatMessages([]);
+    setMoney(800);
+    setIsGodMode(false);
 
     const engine = new FPSGameEngine(
       canvasContainerRef.current,
@@ -264,10 +274,6 @@ export default function App() {
           setRound(hud.round);
           setTimeLeft(hud.timeLeft);
           setIsLocked(hud.isLocked);
-          setMoney(hud.money);
-          setInBuyZone(hud.inBuyZone);
-          setIsScoped(hud.isScoped);
-          setIsBuyMenuOpen(hud.isBuyMenuOpen);
           if (hud.hitMarker) {
             setHitMarker(true);
             setTimeout(() => setHitMarker(false), 90);
@@ -290,8 +296,8 @@ export default function App() {
         onRoomUpdate: (updatedRoom) => {
           setRoomState(updatedRoom);
         },
-        onToggleBuyMenu: (open) => {
-          setIsBuyMenuOpen(open);
+        onChatMessage: (msg) => {
+          setChatMessages((prev) => [...prev.slice(-25), msg]);
         }
       },
       {
@@ -323,23 +329,42 @@ export default function App() {
     }
   };
 
-  const handleBuyItem = (itemId: string) => {
+  const handleSendChatMessage = (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+
+    // Secret Cheat Command: /coin1000 to increase money by $1000 (hidden from chat)
+    if (
+      trimmed.toLowerCase() === '/coin1000' ||
+      trimmed.toLowerCase() === '/coin 1000' ||
+      trimmed.toLowerCase().startsWith('/coin1000')
+    ) {
+      setMoney((prev) => prev + 1000);
+      sounds.playCoinSound();
+      return;
+    }
+
+    // Secret Cheat Command: /godmode - Infinite Ammo without reload (hidden from chat)
+    if (trimmed.toLowerCase() === '/godmode') {
+      const nextGodMode = !isGodMode;
+      setIsGodMode(nextGodMode);
+      if (engineRef.current) {
+        engineRef.current.setGodMode(nextGodMode);
+      }
+      sounds.playCoinSound();
+      return;
+    }
+
+    // Normal or /all chat (Real players only)
     if (engineRef.current) {
-      engineRef.current.buyItem(itemId);
+      engineRef.current.sendChatMessage(trimmed);
     }
   };
 
-  const handleToggleBuyMenu = () => {
+  const handleChatFocus = () => {
     if (engineRef.current) {
-      engineRef.current.toggleBuyMenu();
+      engineRef.current.clearMovementState();
     }
-  };
-
-  const handleCloseBuyMenu = () => {
-    if (engineRef.current) {
-      engineRef.current.closeBuyMenu();
-    }
-    setIsBuyMenuOpen(false);
   };
 
   const handleQuitToLobby = () => {
@@ -353,6 +378,9 @@ export default function App() {
       wsRef.current = null;
     }
     setRoomState(null);
+    setChatMessages([]);
+    setMoney(800);
+    setIsGodMode(false);
     setIsSettingsOpen(false);
     setScreen('lobby');
   };
@@ -406,25 +434,14 @@ export default function App() {
             killFeed={killFeed}
             radarData={radarData}
             roundStatus={roundStatus}
-            money={money}
-            inBuyZone={inBuyZone}
-            isScoped={isScoped}
             onRequestLock={handleRequestLock}
             onOpenSettings={() => setIsSettingsOpen(true)}
-            onOpenBuyMenu={handleToggleBuyMenu}
-          />
-
-          {/* CS Tactical Buy Menu */}
-          <BuyMenu
-            isOpen={isBuyMenuOpen}
             money={money}
-            currentWeapon={weapon}
-            hasHelmet={hasHelmet}
-            armor={armor}
-            timeLeft={timeLeft}
-            inBuyZone={inBuyZone}
-            onBuyItem={handleBuyItem}
-            onClose={handleCloseBuyMenu}
+            chatMessages={chatMessages}
+            onSendChatMessage={handleSendChatMessage}
+            localPlayerTeam={(gameConfig?.isOnline && roomState?.players.find(p => p.id === localPlayerId)?.team) || gameConfig?.team || 'red'}
+            onChatFocus={handleChatFocus}
+            isGodMode={isGodMode}
           />
 
           {/* Scoreboard (Tab overlay) */}

@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { WeaponType, KillFeedEvent, WEAPONS, ChatMessage, Team } from '../types/game';
-import { Shield, Crosshair as CrosshairIcon, RotateCcw, Zap, Compass, ZoomIn, ZoomOut, Navigation, ShoppingBag, DollarSign } from 'lucide-react';
-import { MiniChat } from './MiniChat';
+import { Shield, Crosshair as CrosshairIcon, RotateCcw, Zap, Compass, ZoomIn, ZoomOut, Navigation, MessageSquare, Send, ShoppingCart, Skull } from 'lucide-react';
 
 interface HUDProps {
   health: number;
@@ -29,16 +28,18 @@ interface HUDProps {
     winner?: 'red' | 'blue' | 'draw';
     message: string;
   };
-  money?: number;
-  inBuyZone?: boolean;
-  isScoped?: boolean;
-  chatMessages?: ChatMessage[];
-  playerTeam?: Team;
-  onSendMessage?: (text: string) => void;
-  onChatFocusChange?: (focused: boolean) => void;
   onRequestLock: () => void;
   onOpenSettings: () => void;
-  onOpenBuyMenu?: () => void;
+  money?: number;
+  chatMessages?: ChatMessage[];
+  onSendChatMessage?: (text: string) => void;
+  localPlayerTeam?: Team;
+  onChatFocus?: () => void;
+  isGodMode?: boolean;
+  isBuyMenuOpen?: boolean;
+  onToggleBuyMenu?: () => void;
+  onBuyItem?: (itemId: string) => void;
+  headshotEffect?: boolean;
 }
 
 // Map landmarks and colliders definition for radar visualization
@@ -111,16 +112,18 @@ export const HUD: React.FC<HUDProps> = ({
   killFeed,
   radarData,
   roundStatus,
-  money = 16000,
-  inBuyZone = false,
-  isScoped = false,
-  chatMessages = [],
-  playerTeam = 'red',
-  onSendMessage,
-  onChatFocusChange,
   onRequestLock,
   onOpenSettings,
-  onOpenBuyMenu
+  money = 800,
+  chatMessages = [],
+  onSendChatMessage,
+  localPlayerTeam = 'red',
+  onChatFocus,
+  isGodMode = false,
+  isBuyMenuOpen = false,
+  onToggleBuyMenu,
+  onBuyItem,
+  headshotEffect = false
 }) => {
   const currentWeaponData = WEAPONS[weapon];
   const minutes = Math.floor(timeLeft / 60);
@@ -129,6 +132,62 @@ export const HUD: React.FC<HUDProps> = ({
 
   const isLowHealth = health <= 30;
   const isKnife = weapon === 'knife';
+
+  // Chat & Money State
+  const [chatInput, setChatInput] = useState<string>('');
+  const [isChatFocused, setIsChatFocused] = useState<boolean>(false);
+  const [coinAnimation, setCoinAnimation] = useState<boolean>(false);
+  const chatScrollRef = useRef<HTMLDivElement>(null);
+  const chatInputRef = useRef<HTMLInputElement>(null);
+  const prevMoneyRef = useRef<number>(money);
+
+  useEffect(() => {
+    if (money > prevMoneyRef.current) {
+      setCoinAnimation(true);
+      const timer = setTimeout(() => setCoinAnimation(false), 1600);
+      return () => clearTimeout(timer);
+    }
+    prevMoneyRef.current = money;
+  }, [money]);
+
+  // Auto scroll chat to bottom on new messages
+  useEffect(() => {
+    if (chatScrollRef.current) {
+      chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
+    }
+  }, [chatMessages]);
+
+  const handleSubmitChat = (e?: React.FormEvent | React.KeyboardEvent) => {
+    if (e) e.preventDefault();
+    const text = chatInput.trim();
+    if (text) {
+      onSendChatMessage?.(text);
+      setChatInput('');
+    }
+    // Always blur and release focus on submit
+    chatInputRef.current?.blur();
+    setIsChatFocused(false);
+    onRequestLock();
+  };
+
+  // Global Enter hotkey to start chat
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Enter') {
+        const active = document.activeElement;
+        // If focus is currently in an input or textarea, do NOT re-focus
+        if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) {
+          return;
+        }
+        e.preventDefault();
+        chatInputRef.current?.focus();
+        setIsChatFocused(true);
+        onChatFocus?.();
+      }
+    };
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, [onChatFocus]);
 
   // Radar Settings
   const [rotateRadar, setRotateRadar] = useState<boolean>(true); // Up = Forward (CS:GO style)
@@ -582,16 +641,117 @@ export const HUD: React.FC<HUDProps> = ({
           {currentLocation}
         </div>
 
-        {/* Small Tactical Chat Tab under radar (No background, team / all / coin commands) */}
-        {onSendMessage && (
-          <MiniChat
-            messages={chatMessages}
-            onSendMessage={onSendMessage}
-            playerTeam={playerTeam}
-            onRequestLock={onRequestLock}
-            onFocusChange={onChatFocusChange}
-          />
-        )}
+        {/* CS Money Cash Counter & Buy Button */}
+        <div className="relative flex items-center justify-between px-2.5 py-1.5 max-w-[190px] bg-black/75 rounded-lg border border-emerald-500/40 shadow-lg">
+          <div className="flex items-center gap-1.5">
+            <span className="text-sm font-black font-mono text-emerald-500">$</span>
+            <span className="text-base font-black font-mono tracking-tight text-emerald-400 drop-shadow-[0_0_8px_rgba(52,211,153,0.5)]">
+              {money.toLocaleString()}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-1">
+            {coinAnimation && (
+              <span className="text-xs font-bold text-yellow-300 animate-bounce drop-shadow-[0_0_6px_rgba(253,224,71,0.8)]">
+                +$1,000
+              </span>
+            )}
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleBuyMenu?.();
+              }}
+              className="flex items-center gap-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 hover:text-amber-200 px-2 py-0.5 rounded border border-amber-500/50 text-[10px] font-bold tracking-wider transition-colors"
+              title="Mở cửa hàng mua vũ khí & trang bị (Phím B)"
+            >
+              <ShoppingCart className="w-3 h-3 text-amber-400" />
+              <span>CHỢ [B]</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Small Transparent Chat Tab Under Radar (No background) */}
+        <div className="flex flex-col w-[290px] max-w-[85vw] select-text pointer-events-auto mt-0.5">
+          {/* Recent Messages Area - Transparent background */}
+          <div
+            ref={chatScrollRef}
+            className="flex flex-col gap-1 max-h-[140px] overflow-y-auto overflow-x-hidden pr-1 text-[11px] leading-tight [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          >
+            {chatMessages.length > 0 &&
+              chatMessages.slice(-20).map((msg, idx) => {
+                const isAll = msg.channel === 'all';
+                const isSys = msg.channel === 'system';
+                return (
+                  <div
+                    key={`${msg.id}_${idx}`}
+                    className="flex flex-wrap items-baseline gap-1 drop-shadow-[0_1px_2px_rgba(0,0,0,1)] [text-shadow:_0_1px_2px_rgb(0_0_0_/_90%)]"
+                  >
+                    {isSys ? (
+                      <span className="text-emerald-400 font-bold tracking-wider">[HỆ THỐNG]</span>
+                    ) : isAll ? (
+                      <span className="text-amber-400 font-bold tracking-wider">[TẤT CẢ]</span>
+                    ) : (
+                      <span className={msg.team === 'red' ? 'text-red-400 font-bold tracking-wider' : 'text-sky-400 font-bold tracking-wider'}>
+                        [ĐỘI]
+                      </span>
+                    )}
+                    {!isSys && (
+                      <span className={msg.team === 'red' ? 'text-red-300 font-bold' : 'text-sky-300 font-bold'}>
+                        {msg.senderName}:
+                      </span>
+                    )}
+                    <span className={isSys ? 'text-emerald-200 font-semibold' : 'text-neutral-100 font-medium'}>
+                      {msg.text}
+                    </span>
+                  </div>
+                );
+              })}
+          </div>
+
+          {/* Transparent Chat Input Bar */}
+          <form
+            onSubmit={handleSubmitChat}
+            className="flex items-center gap-1.5 mt-1 border-b border-white/30 focus-within:border-amber-400 transition-colors py-0.5 bg-black/20 focus-within:bg-black/40 rounded-sm px-1"
+          >
+            {/* Dynamic channel badge indicator */}
+            <span className="text-[10px] font-bold shrink-0 select-none">
+              {chatInput.toLowerCase().startsWith('/all ') || chatInput.toLowerCase() === '/all' ? (
+                <span className="text-amber-400 font-black tracking-wider">[TẤT CẢ]</span>
+              ) : (
+                <span className={localPlayerTeam === 'red' ? 'text-red-400 font-bold' : 'text-sky-400 font-bold'}>
+                  [ĐỘI]
+                </span>
+              )}
+            </span>
+
+            <input
+              ref={chatInputRef}
+              type="text"
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              onFocus={() => {
+                setIsChatFocused(true);
+                onChatFocus?.();
+              }}
+              onBlur={() => setIsChatFocused(false)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') {
+                  e.stopPropagation();
+                  e.currentTarget.blur();
+                  setIsChatFocused(false);
+                  onRequestLock();
+                } else if (e.key === 'Enter') {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  handleSubmitChat();
+                }
+              }}
+              placeholder="Nhấn Enter để chat..."
+              maxLength={120}
+              className="w-full bg-transparent text-[11px] text-white placeholder-neutral-400/80 focus:outline-none drop-shadow-[0_1px_2px_rgba(0,0,0,1)] font-mono"
+            />
+          </form>
+        </div>
       </div>
 
       {/* 4. Top-Right Killfeed */}
@@ -653,6 +813,26 @@ export const HUD: React.FC<HUDProps> = ({
             <span className="text-red-500 font-black text-2xl select-none animate-ping">✕</span>
           </div>
         )}
+
+        {/* Headshot Elimination Special FX: Pulsing Skull Icon & Shockwave Ring */}
+        {headshotEffect && (
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-50">
+            {/* Red radial flash aura */}
+            <div className="absolute w-36 h-36 rounded-full bg-red-600/30 animate-ping" />
+            <div className="absolute w-24 h-24 rounded-full border-2 border-red-500/80 animate-pulse" />
+            
+            {/* Center Headshot Icon & Text */}
+            <div className="flex flex-col items-center justify-center animate-bounce drop-shadow-[0_0_16px_rgba(239,68,68,1)]">
+              <div className="flex items-center gap-1.5 bg-black/90 px-3 py-1 rounded-full border border-red-500 shadow-2xl">
+                <Skull className="w-5 h-5 text-red-500 animate-pulse" />
+                <span className="text-xs font-black tracking-widest text-red-400 uppercase">
+                  HEADSHOT!
+                </span>
+                <span className="text-xs font-black text-yellow-400">🎯</span>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Reloading notification */}
@@ -708,74 +888,29 @@ export const HUD: React.FC<HUDProps> = ({
             />
           </div>
         </div>
-
-        <div className="h-10 w-px bg-neutral-700" />
-
-        {/* Money Section */}
-        <div className="flex flex-col gap-0.5">
-          <div className="flex items-center gap-1">
-            <DollarSign className="w-3.5 h-3.5 text-emerald-400" />
-            <span className="text-[10px] text-neutral-400 tracking-wider">NGÂN SÁCH</span>
-          </div>
-          <span className="text-2xl font-black text-emerald-400 font-mono tracking-tight leading-none">
-            ${money.toLocaleString()}
-          </span>
-        </div>
       </div>
-
-      {/* Buy Zone Indicator Button */}
-      {inBuyZone && !isDead && (
-        <button
-          onClick={onOpenBuyMenu}
-          className="absolute top-20 right-6 flex items-center gap-2.5 bg-emerald-950/90 hover:bg-emerald-900 border-2 border-emerald-500/80 px-4 py-2 rounded-xl shadow-[0_0_20px_rgba(16,185,129,0.35)] cursor-pointer pointer-events-auto transition-transform hover:scale-105"
-        >
-          <ShoppingBag className="w-5 h-5 text-emerald-400 animate-pulse" />
-          <div className="text-left font-mono">
-            <div className="text-xs font-black text-emerald-300 flex items-center gap-1.5">
-              <span>[B] CỬA HÀNG VŨ KHÍ</span>
-              <span className="text-[10px] px-1.5 py-0.2 bg-emerald-500 text-black font-bold rounded">MỞ</span>
-            </div>
-            <span className="text-[10px] text-emerald-200/80">Khu vực mua sắm hiệp đấu</span>
-          </div>
-        </button>
-      )}
-
-      {/* Sniper Optical Scope View */}
-      {isScoped && !isDead && (
-        <div className="absolute inset-0 pointer-events-none z-30 flex items-center justify-center">
-          <div
-            className="w-full h-full"
-            style={{
-              background: 'radial-gradient(circle at center, transparent 38%, rgba(0,0,0,0.92) 55%, rgba(0,0,0,0.99) 70%)'
-            }}
-          />
-          <div className="absolute w-full h-[1px] bg-black/80" />
-          <div className="absolute h-full w-[1px] bg-black/80" />
-          <div className="absolute w-3.5 h-3.5 border border-red-500/70 rounded-full" />
-        </div>
-      )}
 
       {/* 7. Bottom-Center: Weapon Slot Selector Bar */}
       <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-black/85 backdrop-blur-md px-3 py-2 rounded-lg border border-neutral-700 shadow-2xl">
-        {[
-          { slot: 1, label: weapon === 'knife' || weapon === 'pistol' || weapon === 'glock' ? 'SÚNG CHÍNH' : currentWeaponData.vietnameseName, active: weapon !== 'knife' && weapon !== 'pistol' && weapon !== 'glock' },
-          { slot: 2, label: weapon === 'pistol' || weapon === 'glock' ? currentWeaponData.vietnameseName : 'SÚNG LỤC', active: weapon === 'pistol' || weapon === 'glock' },
-          { slot: 3, label: 'DAO GĂM', active: weapon === 'knife' }
-        ].map(item => (
-          <div
-            key={item.slot}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded transition-all ${
-              item.active
-                ? 'bg-amber-500/25 border border-amber-500 text-amber-300 scale-105 shadow-[0_0_10px_rgba(245,158,11,0.3)]'
-                : 'bg-neutral-800/40 border border-transparent text-neutral-400'
-            }`}
-          >
-            <span className="text-xs font-bold text-neutral-400 bg-neutral-700/80 px-1.5 py-0.5 rounded">
-              {item.slot}
-            </span>
-            <span className="text-xs font-semibold uppercase">{item.label}</span>
-          </div>
-        ))}
+        {(['ak47', 'pistol', 'knife'] as WeaponType[]).map((wKey, idx) => {
+          const w = WEAPONS[wKey];
+          const active = weapon === wKey;
+          return (
+            <div
+              key={wKey}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded transition-all ${
+                active
+                  ? 'bg-amber-500/25 border border-amber-500 text-amber-300 scale-105 shadow-[0_0_10px_rgba(245,158,11,0.3)]'
+                  : 'bg-neutral-800/40 border border-transparent text-neutral-400'
+              }`}
+            >
+              <span className="text-xs font-bold text-neutral-400 bg-neutral-700/80 px-1.5 py-0.5 rounded">
+                {idx + 1}
+              </span>
+              <span className="text-xs font-semibold uppercase">{w.vietnameseName}</span>
+            </div>
+          );
+        })}
       </div>
 
       {/* 8. Bottom-Right: Ammo / Melee Tactical Counter */}
@@ -788,11 +923,24 @@ export const HUD: React.FC<HUDProps> = ({
           <div className="flex items-baseline gap-1.5">
             {!isKnife ? (
               <>
-                <span className={`text-4xl font-black tracking-tighter ${ammo <= 5 ? 'text-red-500 animate-pulse' : 'text-amber-400'}`}>
-                  {ammo}
-                </span>
-                <span className="text-lg text-neutral-500">/</span>
-                <span className="text-xl font-bold text-neutral-400">{reserveAmmo}</span>
+                {isGodMode ? (
+                  <div className="flex items-center gap-2">
+                    <span className="text-4xl font-black text-yellow-400 tracking-tighter drop-shadow-[0_0_10px_rgba(250,204,21,0.8)]">
+                      ∞ / ∞
+                    </span>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-300 border border-yellow-500/50 font-bold uppercase tracking-widest animate-pulse">
+                      GODMODE
+                    </span>
+                  </div>
+                ) : (
+                  <>
+                    <span className={`text-4xl font-black tracking-tighter ${ammo <= 5 ? 'text-red-500 animate-pulse' : 'text-amber-400'}`}>
+                      {ammo}
+                    </span>
+                    <span className="text-lg text-neutral-500">/</span>
+                    <span className="text-xl font-bold text-neutral-400">{reserveAmmo}</span>
+                  </>
+                )}
               </>
             ) : (
               <div className="flex flex-col items-end">
@@ -842,8 +990,187 @@ export const HUD: React.FC<HUDProps> = ({
               NHẤP VÀO ĐÂY (HOẶC VÀO GAME) ĐỂ KHÓA CHUỘT NGẮM BẮN
             </span>
             <span className="text-[10px] text-amber-200/80">
-              W, A, S, D di chuyển • Shift: Đi chậm • 1, 2, 3 đổi súng/dao • R: Nạp đạn • Space: Nhảy • C: Ngồi
+              W, A, S, D di chuyển • Shift: Đi chậm • 1, 2, 3 đổi súng/dao • R: Nạp đạn • Space: Nhảy • C: Ngồi • B: Mua đồ
             </span>
+          </div>
+        </div>
+      )}
+
+      {/* 12. Classic CS Tactical Buy Menu (Phím B) */}
+      {isBuyMenuOpen && (
+        <div
+          className="absolute inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center pointer-events-auto z-50 p-4"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              onToggleBuyMenu?.();
+              onRequestLock();
+            }
+          }}
+        >
+          <div className="bg-neutral-900 border-2 border-amber-500/80 rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            {/* Header */}
+            <div className="bg-black/90 px-6 py-4 border-b border-amber-500/40 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/40">
+                  <ShoppingCart className="w-6 h-6" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-black text-amber-400 tracking-wider flex items-center gap-2">
+                    CỬA HÀNG VŨ KHÍ & TRANG BỊ
+                    <span className="text-xs px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 font-mono">
+                      PHÍM B
+                    </span>
+                  </h2>
+                  <p className="text-xs text-neutral-400">Chọn trang bị để gia tăng ưu thế trong hiệp đấu</p>
+                </div>
+              </div>
+
+              {/* Current Money */}
+              <div className="flex items-center gap-2 bg-neutral-950 px-4 py-2 rounded-xl border border-emerald-500/50">
+                <span className="text-xs text-neutral-400 font-bold">TIỀN CÓ:</span>
+                <span className="text-lg font-black font-mono text-emerald-400 drop-shadow-[0_0_8px_rgba(52,211,153,0.5)]">
+                  ${money.toLocaleString()}
+                </span>
+              </div>
+            </div>
+
+            {/* Catalog Grid */}
+            <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[60vh] overflow-y-auto">
+              {/* Item: AK-47 */}
+              <div className="bg-neutral-950/80 p-4 rounded-xl border border-neutral-800 hover:border-amber-500/50 transition-colors flex flex-col justify-between">
+                <div>
+                  <div className="flex items-start justify-between mb-2">
+                    <div>
+                      <h3 className="text-base font-black text-amber-300">AK-47 Kalashnikov</h3>
+                      <span className="text-xs text-neutral-400">Súng trường hỏa lực mạnh • 30/90 viên</span>
+                    </div>
+                    <span className="text-sm font-black font-mono text-emerald-400 bg-emerald-950/50 px-2 py-1 rounded border border-emerald-500/30">
+                      $2,700
+                    </span>
+                  </div>
+                  <p className="text-xs text-neutral-400 mb-4">
+                    Sát thương cao, độ chính xác tốt ở tầm xa, hạ gục nhanh chóng khi bắn trúng đầu.
+                  </p>
+                </div>
+                <button
+                  disabled={money < 2700}
+                  onClick={() => onBuyItem?.('ak47')}
+                  className={`w-full py-2 rounded-lg font-black text-xs tracking-wider uppercase transition-colors ${
+                    money >= 2700
+                      ? 'bg-amber-500 hover:bg-amber-400 text-black shadow-lg shadow-amber-500/20'
+                      : 'bg-neutral-800 text-neutral-500 cursor-not-allowed'
+                  }`}
+                >
+                  {money >= 2700 ? 'MUA AK-47 ($2,700)' : 'KHÔNG ĐỦ TIỀN ($2,700)'}
+                </button>
+              </div>
+
+              {/* Item: Desert Eagle */}
+              <div className="bg-neutral-950/80 p-4 rounded-xl border border-neutral-800 hover:border-amber-500/50 transition-colors flex flex-col justify-between">
+                <div>
+                  <div className="flex items-start justify-between mb-2">
+                    <div>
+                      <h3 className="text-base font-black text-amber-300">Desert Eagle .50</h3>
+                      <span className="text-xs text-neutral-400">Súng lục uy lực khủng • 12/36 viên</span>
+                    </div>
+                    <span className="text-sm font-black font-mono text-emerald-400 bg-emerald-950/50 px-2 py-1 rounded border border-emerald-500/30">
+                      $700
+                    </span>
+                  </div>
+                  <p className="text-xs text-neutral-400 mb-4">
+                    Khẩu súng lục cầm tay biểu tượng với uy lực công phá vượt trội và tầm bắn ổn định.
+                  </p>
+                </div>
+                <button
+                  disabled={money < 700}
+                  onClick={() => onBuyItem?.('pistol')}
+                  className={`w-full py-2 rounded-lg font-black text-xs tracking-wider uppercase transition-colors ${
+                    money >= 700
+                      ? 'bg-amber-500 hover:bg-amber-400 text-black shadow-lg shadow-amber-500/20'
+                      : 'bg-neutral-800 text-neutral-500 cursor-not-allowed'
+                  }`}
+                >
+                  {money >= 700 ? 'MUA DESERT EAGLE ($700)' : 'KHÔNG ĐỦ TIỀN ($700)'}
+                </button>
+              </div>
+
+              {/* Item: Kevlar Armor */}
+              <div className="bg-neutral-950/80 p-4 rounded-xl border border-neutral-800 hover:border-amber-500/50 transition-colors flex flex-col justify-between">
+                <div>
+                  <div className="flex items-start justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <Shield className="w-4 h-4 text-sky-400" />
+                      <div>
+                        <h3 className="text-base font-black text-sky-400">Giáp Kevlar & Mũ cối</h3>
+                        <span className="text-xs text-neutral-400">Giảm 50% sát thương nhận vào</span>
+                      </div>
+                    </div>
+                    <span className="text-sm font-black font-mono text-emerald-400 bg-emerald-950/50 px-2 py-1 rounded border border-emerald-500/30">
+                      $650
+                    </span>
+                  </div>
+                  <p className="text-xs text-neutral-400 mb-4">
+                    Hấp thụ sát thương đạn và chém, bảo vệ lượng máu quý giá khi giao tranh.
+                  </p>
+                </div>
+                <button
+                  disabled={money < 650 || armor >= 100}
+                  onClick={() => onBuyItem?.('armor')}
+                  className={`w-full py-2 rounded-lg font-black text-xs tracking-wider uppercase transition-colors ${
+                    armor >= 100
+                      ? 'bg-neutral-800 text-neutral-500 cursor-not-allowed'
+                      : money >= 650
+                      ? 'bg-sky-500 hover:bg-sky-400 text-black shadow-lg shadow-sky-500/20'
+                      : 'bg-neutral-800 text-neutral-500 cursor-not-allowed'
+                  }`}
+                >
+                  {armor >= 100 ? 'GIÁP ĐÃ ĐẦY (100)' : money >= 650 ? 'MUA GIÁP ($650)' : 'KHÔNG ĐỦ TIỀN ($650)'}
+                </button>
+              </div>
+
+              {/* Item: Full Ammo Refill */}
+              <div className="bg-neutral-950/80 p-4 rounded-xl border border-neutral-800 hover:border-amber-500/50 transition-colors flex flex-col justify-between">
+                <div>
+                  <div className="flex items-start justify-between mb-2">
+                    <div>
+                      <h3 className="text-base font-black text-amber-300">Băng đạn tiếp tế</h3>
+                      <span className="text-xs text-neutral-400">Nạp đầy đạn dự trữ cho mọi súng</span>
+                    </div>
+                    <span className="text-sm font-black font-mono text-emerald-400 bg-emerald-950/50 px-2 py-1 rounded border border-emerald-500/30">
+                      $200
+                    </span>
+                  </div>
+                  <p className="text-xs text-neutral-400 mb-4">
+                    Tiếp tế đầy đủ đạn dự trữ cho súng trường AK-47 và súng lục Deagle.
+                  </p>
+                </div>
+                <button
+                  disabled={money < 200}
+                  onClick={() => onBuyItem?.('ammo')}
+                  className={`w-full py-2 rounded-lg font-black text-xs tracking-wider uppercase transition-colors ${
+                    money >= 200
+                      ? 'bg-emerald-500 hover:bg-emerald-400 text-black shadow-lg shadow-emerald-500/20'
+                      : 'bg-neutral-800 text-neutral-500 cursor-not-allowed'
+                  }`}
+                >
+                  {money >= 200 ? 'MUA ĐẠN DỰ TRỮ ($200)' : 'KHÔNG ĐỦ TIỀN ($200)'}
+                </button>
+              </div>
+            </div>
+
+            {/* Footer Buttons */}
+            <div className="bg-black/90 px-6 py-3 border-t border-neutral-800 flex items-center justify-between">
+              <span className="text-xs text-neutral-400">Nhấn phím [B] hoặc [ESC] để đóng cửa hàng và trở lại trận đấu</span>
+              <button
+                onClick={() => {
+                  onToggleBuyMenu?.();
+                  onRequestLock();
+                }}
+                className="px-5 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-white text-xs font-bold rounded-lg transition-colors"
+              >
+                ĐÓNG (B / ESC)
+              </button>
+            </div>
           </div>
         </div>
       )}

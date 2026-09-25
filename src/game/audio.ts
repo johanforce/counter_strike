@@ -350,164 +350,6 @@ class SoundEngine {
     osc.stop(now + 0.09);
   }
 
-  // AWP Sniper: Thunderous deep boom with reverberation
-  public playAWPShot() {
-    if (this.muted) return;
-    this.init();
-    if (!this.ctx || !this.masterGain) return;
-    const now = this.ctx.currentTime;
-
-    // Sub-bass heavy thump
-    const subOsc = this.ctx.createOscillator();
-    const subGain = this.ctx.createGain();
-    subOsc.type = 'sine';
-    subOsc.frequency.setValueAtTime(120, now);
-    subOsc.frequency.exponentialRampToValueAtTime(25, now + 0.35);
-    subGain.gain.setValueAtTime(1.0, now);
-    subGain.gain.exponentialRampToValueAtTime(0.01, now + 0.38);
-    subOsc.connect(subGain);
-    subGain.connect(this.masterGain);
-    subOsc.start(now);
-    subOsc.stop(now + 0.4);
-
-    // High velocity sonic boom crack
-    const noise = this.ctx.createBufferSource();
-    const noiseBuffer = this.createNoiseBuffer();
-    if (noiseBuffer) {
-      noise.buffer = noiseBuffer;
-      const filter = this.ctx.createBiquadFilter();
-      filter.type = 'lowpass';
-      filter.frequency.setValueAtTime(3200, now);
-      filter.frequency.exponentialRampToValueAtTime(180, now + 0.45);
-
-      const noiseGain = this.ctx.createGain();
-      noiseGain.gain.setValueAtTime(1.2, now);
-      noiseGain.gain.exponentialRampToValueAtTime(0.01, now + 0.48);
-
-      noise.connect(filter);
-      filter.connect(noiseGain);
-      noiseGain.connect(this.masterGain);
-      noise.start(now);
-      noise.stop(now + 0.5);
-    }
-  }
-
-  // M4A4: Crisp, precise tactical rifle crack
-  public playM4A4Shot() {
-    if (this.muted) return;
-    this.init();
-    if (!this.ctx || !this.masterGain) return;
-    const now = this.ctx.currentTime;
-
-    const osc = this.ctx.createOscillator();
-    const oscGain = this.ctx.createGain();
-    osc.type = 'triangle';
-    osc.frequency.setValueAtTime(180, now);
-    osc.frequency.exponentialRampToValueAtTime(45, now + 0.09);
-    oscGain.gain.setValueAtTime(0.7, now);
-    oscGain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
-    osc.connect(oscGain);
-    oscGain.connect(this.masterGain);
-    osc.start(now);
-    osc.stop(now + 0.11);
-
-    const noise = this.ctx.createBufferSource();
-    const noiseBuffer = this.createNoiseBuffer();
-    if (noiseBuffer) {
-      noise.buffer = noiseBuffer;
-      const filter = this.ctx.createBiquadFilter();
-      filter.type = 'bandpass';
-      filter.frequency.setValueAtTime(1800, now);
-      filter.frequency.exponentialRampToValueAtTime(450, now + 0.12);
-
-      const noiseGain = this.ctx.createGain();
-      noiseGain.gain.setValueAtTime(0.85, now);
-      noiseGain.gain.exponentialRampToValueAtTime(0.01, now + 0.13);
-      noise.connect(filter);
-      filter.connect(noiseGain);
-      noiseGain.connect(this.masterGain);
-      noise.start(now);
-      noise.stop(now + 0.14);
-    }
-  }
-
-  // SMG / Shotgun sounds
-  public playSMGShot() {
-    if (this.muted) return;
-    this.init();
-    if (!this.ctx || !this.masterGain) return;
-    const now = this.ctx.currentTime;
-
-    const noise = this.ctx.createBufferSource();
-    const noiseBuffer = this.createNoiseBuffer();
-    if (noiseBuffer) {
-      noise.buffer = noiseBuffer;
-      const filter = this.ctx.createBiquadFilter();
-      filter.type = 'bandpass';
-      filter.frequency.setValueAtTime(2200, now);
-      filter.frequency.exponentialRampToValueAtTime(600, now + 0.08);
-
-      const noiseGain = this.ctx.createGain();
-      noiseGain.gain.setValueAtTime(0.65, now);
-      noiseGain.gain.exponentialRampToValueAtTime(0.01, now + 0.08);
-      noise.connect(filter);
-      filter.connect(noiseGain);
-      noiseGain.connect(this.masterGain);
-      noise.start(now);
-      noise.stop(now + 0.09);
-    }
-  }
-
-  // Cash purchase sound (classic CS register cha-ching)
-  public playBuySound() {
-    if (this.muted) return;
-    this.init();
-    if (!this.ctx || !this.masterGain) return;
-    const now = this.ctx.currentTime;
-
-    const osc1 = this.ctx.createOscillator();
-    const osc2 = this.ctx.createOscillator();
-    const gain = this.ctx.createGain();
-
-    osc1.type = 'sine';
-    osc2.type = 'triangle';
-    osc1.frequency.setValueAtTime(987.77, now); // B5
-    osc1.frequency.setValueAtTime(1318.51, now + 0.08); // E6
-    osc2.frequency.setValueAtTime(1975.53, now + 0.08); // B6
-
-    gain.gain.setValueAtTime(0.4, now);
-    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.35);
-
-    osc1.connect(gain);
-    osc2.connect(gain);
-    gain.connect(this.masterGain);
-
-    osc1.start(now);
-    osc2.start(now + 0.08);
-    osc1.stop(now + 0.38);
-    osc2.stop(now + 0.38);
-  }
-
-  // Sniper Scope Zoom Click
-  public playSniperZoom() {
-    if (this.muted) return;
-    this.init();
-    if (!this.ctx || !this.masterGain) return;
-    const now = this.ctx.currentTime;
-
-    const osc = this.ctx.createOscillator();
-    const gain = this.ctx.createGain();
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(600, now);
-    osc.frequency.exponentialRampToValueAtTime(1200, now + 0.04);
-    gain.gain.setValueAtTime(0.3, now);
-    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.05);
-    osc.connect(gain);
-    gain.connect(this.masterGain);
-    osc.start(now);
-    osc.stop(now + 0.06);
-  }
-
   // Round start horn
   public playRoundStart() {
     if (this.muted) return;
@@ -572,6 +414,57 @@ class SoundEngine {
       osc.start(now + i * 0.2);
       osc.stop(now + i * 0.2 + 0.48);
     });
+  }
+
+  // Coin / Cash Pickup Ding (for /coin1000 command)
+  public playCoinSound() {
+    if (this.muted) return;
+    this.init();
+    if (!this.ctx || !this.masterGain) return;
+    const now = this.ctx.currentTime;
+
+    const osc1 = this.ctx.createOscillator();
+    const gain1 = this.ctx.createGain();
+    osc1.type = 'sine';
+    osc1.frequency.setValueAtTime(987.77, now); // B5
+    osc1.frequency.setValueAtTime(1318.51, now + 0.08); // E6
+    gain1.gain.setValueAtTime(0.35, now);
+    gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
+    osc1.connect(gain1);
+    gain1.connect(this.masterGain);
+    osc1.start(now);
+    osc1.stop(now + 0.46);
+
+    const osc2 = this.ctx.createOscillator();
+    const gain2 = this.ctx.createGain();
+    osc2.type = 'triangle';
+    osc2.frequency.setValueAtTime(1975.53, now + 0.08); // B6 harmonic
+    gain2.gain.setValueAtTime(0.18, now + 0.08);
+    gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+    osc2.connect(gain2);
+    gain2.connect(this.masterGain);
+    osc2.start(now + 0.08);
+    osc2.stop(now + 0.36);
+  }
+
+  // Radio Chat squelch / message click
+  public playRadioChatSound() {
+    if (this.muted) return;
+    this.init();
+    if (!this.ctx || !this.masterGain) return;
+    const now = this.ctx.currentTime;
+
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(800, now);
+    osc.frequency.exponentialRampToValueAtTime(600, now + 0.05);
+    gain.gain.setValueAtTime(0.18, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
+    osc.connect(gain);
+    gain.connect(this.masterGain);
+    osc.start(now);
+    osc.stop(now + 0.07);
   }
 }
 

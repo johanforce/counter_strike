@@ -26,9 +26,10 @@ interface PlayerState {
   rotY: number;
   pitch: number;
   health: number;
+  armor: number;
   kills: number;
   deaths: number;
-  weapon: 'ak47' | 'pistol' | 'knife';
+  weapon: string;
   isAlive: boolean;
   ping: number;
   lastActive: number;
@@ -190,6 +191,22 @@ function broadcastToRoom(room: Room, msg: object, exceptId?: string) {
   });
 }
 
+function broadcastChat(room: Room, msg: object, targetTeam?: 'red' | 'blue') {
+  const data = JSON.stringify(msg);
+  room.wsClients.forEach((client, playerId) => {
+    if (client.readyState === WebSocket.OPEN) {
+      if (!targetTeam) {
+        client.send(data);
+      } else {
+        const player = room.players.get(playerId);
+        if (player && player.team === targetTeam) {
+          client.send(data);
+        }
+      }
+    }
+  });
+}
+
 function getRoomSnapshot(room: Room) {
   const players: PlayerState[] = [];
   room.players.forEach(p => players.push({ ...p }));
@@ -212,8 +229,9 @@ function startNewRound(room: Room) {
   room.state = 'playing';
   room.roundTimeLeft = 90; // 90 seconds round
 
-  room.players.forEach((p, id) => {
+  room.players.forEach((p) => {
     p.health = 100;
+    p.armor = 100;
     p.isAlive = true;
     const spawn = getSpawn(p.team, p.slot);
     p.x = spawn.x;
@@ -469,6 +487,7 @@ wss.on('connection', (ws: WebSocket) => {
           rotY: spawn.rotY,
           pitch: 0,
           health: 100,
+          armor: 100,
           kills: 0,
           deaths: 0,
           weapon: 'ak47',
@@ -532,74 +551,7 @@ wss.on('connection', (ws: WebSocket) => {
           return;
         }
 
-        // Auto-fill bots for empty slots to ensure both teams have combatants
-        const targetPerTeam = room.mode === '1v1' ? 1 : 2;
-        let redCount = 0;
-        let blueCount = 0;
-        room.players.forEach(p => {
-          if (p.team === 'red') redCount++;
-          else blueCount++;
-        });
-
-        const botNames = ['Shadow', 'Viper', 'Ghost', 'Raptor', 'Blaze', 'Striker', 'Titan', 'Apex'];
-        let nameIdx = 0;
-
-        // Auto-fill Red team bots if missing
-        while (redCount < targetPerTeam) {
-          const botId = 'bot_red_' + Math.random().toString(36).substring(2, 7);
-          const spawn = getSpawn('red', redCount);
-          const botPlayer: PlayerState = {
-            id: botId,
-            name: `${botNames[nameIdx++ % botNames.length]} [BOT]`,
-            roomCode: room.code,
-            team: 'red',
-            slot: redCount,
-            isBot: true,
-            x: spawn.x,
-            y: spawn.y,
-            z: spawn.z,
-            rotY: spawn.rotY,
-            pitch: 0,
-            health: 100,
-            kills: 0,
-            deaths: 0,
-            weapon: 'ak47',
-            isAlive: true,
-            ping: 0,
-            lastActive: Date.now()
-          };
-          room.players.set(botId, botPlayer);
-          redCount++;
-        }
-
-        // Auto-fill Blue team bots if missing
-        while (blueCount < targetPerTeam) {
-          const botId = 'bot_blue_' + Math.random().toString(36).substring(2, 7);
-          const spawn = getSpawn('blue', blueCount);
-          const botPlayer: PlayerState = {
-            id: botId,
-            name: `${botNames[nameIdx++ % botNames.length]} [BOT]`,
-            roomCode: room.code,
-            team: 'blue',
-            slot: blueCount,
-            isBot: true,
-            x: spawn.x,
-            y: spawn.y,
-            z: spawn.z,
-            rotY: spawn.rotY,
-            pitch: 0,
-            health: 100,
-            kills: 0,
-            deaths: 0,
-            weapon: 'ak47',
-            isAlive: true,
-            ping: 0,
-            lastActive: Date.now()
-          };
-          room.players.set(botId, botPlayer);
-          blueCount++;
-        }
-
+        // Online mode: Do NOT auto-fill bots into empty slots. Only human players who joined play.
         room.state = 'playing';
         room.roundTimeLeft = 90;
         startNewRound(room);
@@ -673,9 +625,30 @@ wss.on('connection', (ws: WebSocket) => {
         if (!target || !target.isAlive) return;
 
         const rawDamage = Math.max(1, data.damage || 25);
-        const damage = Math.max(1, Math.round(rawDamage));
         const isHeadshot = !!data.isHeadshot;
-        target.health = Math.max(0, target.health - damage);
+        const weapon = data.weapon || 'ak47';
+
+        // CS Armor & Damage calculation
+        let healthDmg = rawDamage;
+        let armorDmg = 0;
+
+        if (target.armor > 0) {
+          // CS Armor penetration factors:
+          // Knife: 85% | AWP: 97.5% | AK-47: 77.5% | Deagle: 85% | M4A4: 70% | SMG/Shotguns: 60%
+          let armorPen = 0.70;
+          if (weapon === 'knife') armorPen = 0.85;
+          else if (weapon === 'awp') armorPen = 0.975;
+          else if (weapon === 'ak47') armorPen = 0.775;
+          else if (weapon === 'pistol') armorPen = 0.85;
+          else if (weapon === 'm4a4') armorPen = 0.70;
+          else if (weapon === 'mp9' || weapon === 'shotgun' || weapon === 'glock') armorPen = 0.60;
+
+          healthDmg = Math.max(1, Math.round(rawDamage * armorPen));
+          armorDmg = Math.max(0, Math.round(rawDamage * (1 - armorPen)));
+          target.armor = Math.max(0, target.armor - armorDmg);
+        }
+
+        target.health = Math.max(0, target.health - healthDmg);
 
         if (target.health === 0) {
           target.isAlive = false;
@@ -701,11 +674,47 @@ wss.on('connection', (ws: WebSocket) => {
             type: 'player_damaged',
             targetId: target.id,
             attackerId: attacker?.id,
-            damage,
+            damage: healthDmg,
             health: target.health,
+            armor: target.armor,
             isHeadshot
           });
         }
+      }
+
+      else if (type === 'buy_weapon') {
+        const room = rooms.get(currentRoomCode);
+        if (!room) return;
+        const p = room.players.get(currentPlayerId);
+        if (!p) return;
+        if (data.weapon) p.weapon = data.weapon;
+        if (data.armor !== undefined) p.armor = data.armor;
+        broadcastToRoom(room, {
+          type: 'player_updated',
+          player: p,
+          room: getRoomSnapshot(room)
+        });
+      }
+
+      else if (type === 'chat_message') {
+        const room = rooms.get(currentRoomCode);
+        if (!room) return;
+        const p = room.players.get(currentPlayerId);
+        if (!p) return;
+        const text = (data.text || '').trim();
+        if (!text) return;
+        const isAll = !!data.isAll;
+
+        broadcastChat(room, {
+          type: 'chat_message',
+          id: 'chat_' + Math.random().toString(36).substring(2, 9),
+          senderId: p.id,
+          senderName: p.name,
+          senderTeam: p.team,
+          text,
+          isAll,
+          timestamp: Date.now()
+        }, isAll ? undefined : p.team);
       }
 
       else if (type === 'add_bot') {
@@ -742,6 +751,7 @@ wss.on('connection', (ws: WebSocket) => {
           rotY: spawn.rotY,
           pitch: 0,
           health: 100,
+          armor: 100,
           kills: 0,
           deaths: 0,
           weapon: 'ak47',

@@ -19,6 +19,7 @@ import { Lobby } from './components/Lobby';
 import { Scoreboard } from './components/Scoreboard';
 import { SettingsModal } from './components/SettingsModal';
 import { WaitingRoom } from './components/WaitingRoom';
+import { BuyMenu } from './components/BuyMenu';
 
 interface GameConfig {
   playerName: string;
@@ -87,6 +88,13 @@ export default function App() {
     winner?: 'red' | 'blue' | 'draw';
     message: string;
   }>({ show: false, message: '' });
+
+  // Buy Menu & Economy States
+  const [money, setMoney] = useState<number>(16000);
+  const [inBuyZone, setInBuyZone] = useState<boolean>(true);
+  const [isBuyMenuOpen, setIsBuyMenuOpen] = useState<boolean>(false);
+  const [isScoped, setIsScoped] = useState<boolean>(false);
+  const [hasHelmet, setHasHelmet] = useState<boolean>(true);
 
   // Scoreboard Tab Key
   const [isScoreboardOpen, setIsScoreboardOpen] = useState<boolean>(false);
@@ -256,6 +264,10 @@ export default function App() {
           setRound(hud.round);
           setTimeLeft(hud.timeLeft);
           setIsLocked(hud.isLocked);
+          setMoney(hud.money);
+          setInBuyZone(hud.inBuyZone);
+          setIsScoped(hud.isScoped);
+          setIsBuyMenuOpen(hud.isBuyMenuOpen);
           if (hud.hitMarker) {
             setHitMarker(true);
             setTimeout(() => setHitMarker(false), 90);
@@ -277,6 +289,9 @@ export default function App() {
         },
         onRoomUpdate: (updatedRoom) => {
           setRoomState(updatedRoom);
+        },
+        onToggleBuyMenu: (open) => {
+          setIsBuyMenuOpen(open);
         }
       },
       {
@@ -306,6 +321,25 @@ export default function App() {
     if (engineRef.current) {
       engineRef.current.requestLock();
     }
+  };
+
+  const handleBuyItem = (itemId: string) => {
+    if (engineRef.current) {
+      engineRef.current.buyItem(itemId);
+    }
+  };
+
+  const handleToggleBuyMenu = () => {
+    if (engineRef.current) {
+      engineRef.current.toggleBuyMenu();
+    }
+  };
+
+  const handleCloseBuyMenu = () => {
+    if (engineRef.current) {
+      engineRef.current.closeBuyMenu();
+    }
+    setIsBuyMenuOpen(false);
   };
 
   const handleQuitToLobby = () => {
@@ -372,8 +406,25 @@ export default function App() {
             killFeed={killFeed}
             radarData={radarData}
             roundStatus={roundStatus}
+            money={money}
+            inBuyZone={inBuyZone}
+            isScoped={isScoped}
             onRequestLock={handleRequestLock}
             onOpenSettings={() => setIsSettingsOpen(true)}
+            onOpenBuyMenu={handleToggleBuyMenu}
+          />
+
+          {/* CS Tactical Buy Menu */}
+          <BuyMenu
+            isOpen={isBuyMenuOpen}
+            money={money}
+            currentWeapon={weapon}
+            hasHelmet={hasHelmet}
+            armor={armor}
+            timeLeft={timeLeft}
+            inBuyZone={inBuyZone}
+            onBuyItem={handleBuyItem}
+            onClose={handleCloseBuyMenu}
           />
 
           {/* Scoreboard (Tab overlay) */}

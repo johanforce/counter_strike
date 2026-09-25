@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { WeaponType, KillFeedEvent, WEAPONS } from '../types/game';
-import { Shield, Crosshair as CrosshairIcon, RotateCcw, Zap, Compass, ZoomIn, ZoomOut, Navigation } from 'lucide-react';
+import { WeaponType, KillFeedEvent, WEAPONS, ChatMessage, Team } from '../types/game';
+import { Shield, Crosshair as CrosshairIcon, RotateCcw, Zap, Compass, ZoomIn, ZoomOut, Navigation, ShoppingBag, DollarSign } from 'lucide-react';
+import { MiniChat } from './MiniChat';
 
 interface HUDProps {
   health: number;
@@ -28,8 +29,16 @@ interface HUDProps {
     winner?: 'red' | 'blue' | 'draw';
     message: string;
   };
+  money?: number;
+  inBuyZone?: boolean;
+  isScoped?: boolean;
+  chatMessages?: ChatMessage[];
+  playerTeam?: Team;
+  onSendMessage?: (text: string) => void;
+  onChatFocusChange?: (focused: boolean) => void;
   onRequestLock: () => void;
   onOpenSettings: () => void;
+  onOpenBuyMenu?: () => void;
 }
 
 // Map landmarks and colliders definition for radar visualization
@@ -102,8 +111,16 @@ export const HUD: React.FC<HUDProps> = ({
   killFeed,
   radarData,
   roundStatus,
+  money = 16000,
+  inBuyZone = false,
+  isScoped = false,
+  chatMessages = [],
+  playerTeam = 'red',
+  onSendMessage,
+  onChatFocusChange,
   onRequestLock,
-  onOpenSettings
+  onOpenSettings,
+  onOpenBuyMenu
 }) => {
   const currentWeaponData = WEAPONS[weapon];
   const minutes = Math.floor(timeLeft / 60);
@@ -564,6 +581,17 @@ export const HUD: React.FC<HUDProps> = ({
         <div className="bg-black/85 backdrop-blur-md px-2.5 py-1 rounded border border-neutral-700/80 shadow-lg text-[10.5px] font-bold text-amber-300 tracking-wide text-center truncate max-w-[190px]">
           {currentLocation}
         </div>
+
+        {/* Small Tactical Chat Tab under radar (No background, team / all / coin commands) */}
+        {onSendMessage && (
+          <MiniChat
+            messages={chatMessages}
+            onSendMessage={onSendMessage}
+            playerTeam={playerTeam}
+            onRequestLock={onRequestLock}
+            onFocusChange={onChatFocusChange}
+          />
+        )}
       </div>
 
       {/* 4. Top-Right Killfeed */}
@@ -680,29 +708,74 @@ export const HUD: React.FC<HUDProps> = ({
             />
           </div>
         </div>
+
+        <div className="h-10 w-px bg-neutral-700" />
+
+        {/* Money Section */}
+        <div className="flex flex-col gap-0.5">
+          <div className="flex items-center gap-1">
+            <DollarSign className="w-3.5 h-3.5 text-emerald-400" />
+            <span className="text-[10px] text-neutral-400 tracking-wider">NGÂN SÁCH</span>
+          </div>
+          <span className="text-2xl font-black text-emerald-400 font-mono tracking-tight leading-none">
+            ${money.toLocaleString()}
+          </span>
+        </div>
       </div>
+
+      {/* Buy Zone Indicator Button */}
+      {inBuyZone && !isDead && (
+        <button
+          onClick={onOpenBuyMenu}
+          className="absolute top-20 right-6 flex items-center gap-2.5 bg-emerald-950/90 hover:bg-emerald-900 border-2 border-emerald-500/80 px-4 py-2 rounded-xl shadow-[0_0_20px_rgba(16,185,129,0.35)] cursor-pointer pointer-events-auto transition-transform hover:scale-105"
+        >
+          <ShoppingBag className="w-5 h-5 text-emerald-400 animate-pulse" />
+          <div className="text-left font-mono">
+            <div className="text-xs font-black text-emerald-300 flex items-center gap-1.5">
+              <span>[B] CỬA HÀNG VŨ KHÍ</span>
+              <span className="text-[10px] px-1.5 py-0.2 bg-emerald-500 text-black font-bold rounded">MỞ</span>
+            </div>
+            <span className="text-[10px] text-emerald-200/80">Khu vực mua sắm hiệp đấu</span>
+          </div>
+        </button>
+      )}
+
+      {/* Sniper Optical Scope View */}
+      {isScoped && !isDead && (
+        <div className="absolute inset-0 pointer-events-none z-30 flex items-center justify-center">
+          <div
+            className="w-full h-full"
+            style={{
+              background: 'radial-gradient(circle at center, transparent 38%, rgba(0,0,0,0.92) 55%, rgba(0,0,0,0.99) 70%)'
+            }}
+          />
+          <div className="absolute w-full h-[1px] bg-black/80" />
+          <div className="absolute h-full w-[1px] bg-black/80" />
+          <div className="absolute w-3.5 h-3.5 border border-red-500/70 rounded-full" />
+        </div>
+      )}
 
       {/* 7. Bottom-Center: Weapon Slot Selector Bar */}
       <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-black/85 backdrop-blur-md px-3 py-2 rounded-lg border border-neutral-700 shadow-2xl">
-        {(['ak47', 'pistol', 'knife'] as WeaponType[]).map((wKey, idx) => {
-          const w = WEAPONS[wKey];
-          const active = weapon === wKey;
-          return (
-            <div
-              key={wKey}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded transition-all ${
-                active
-                  ? 'bg-amber-500/25 border border-amber-500 text-amber-300 scale-105 shadow-[0_0_10px_rgba(245,158,11,0.3)]'
-                  : 'bg-neutral-800/40 border border-transparent text-neutral-400'
-              }`}
-            >
-              <span className="text-xs font-bold text-neutral-400 bg-neutral-700/80 px-1.5 py-0.5 rounded">
-                {idx + 1}
-              </span>
-              <span className="text-xs font-semibold uppercase">{w.vietnameseName}</span>
-            </div>
-          );
-        })}
+        {[
+          { slot: 1, label: weapon === 'knife' || weapon === 'pistol' || weapon === 'glock' ? 'SÚNG CHÍNH' : currentWeaponData.vietnameseName, active: weapon !== 'knife' && weapon !== 'pistol' && weapon !== 'glock' },
+          { slot: 2, label: weapon === 'pistol' || weapon === 'glock' ? currentWeaponData.vietnameseName : 'SÚNG LỤC', active: weapon === 'pistol' || weapon === 'glock' },
+          { slot: 3, label: 'DAO GĂM', active: weapon === 'knife' }
+        ].map(item => (
+          <div
+            key={item.slot}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded transition-all ${
+              item.active
+                ? 'bg-amber-500/25 border border-amber-500 text-amber-300 scale-105 shadow-[0_0_10px_rgba(245,158,11,0.3)]'
+                : 'bg-neutral-800/40 border border-transparent text-neutral-400'
+            }`}
+          >
+            <span className="text-xs font-bold text-neutral-400 bg-neutral-700/80 px-1.5 py-0.5 rounded">
+              {item.slot}
+            </span>
+            <span className="text-xs font-semibold uppercase">{item.label}</span>
+          </div>
+        ))}
       </div>
 
       {/* 8. Bottom-Right: Ammo / Melee Tactical Counter */}

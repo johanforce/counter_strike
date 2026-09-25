@@ -231,7 +231,7 @@ export const WaitingRoom: React.FC<WaitingRoomProps> = ({
                     key={`red_empty_${idx}`}
                     className="p-3 rounded-lg border border-dashed border-neutral-800/80 bg-neutral-950/30 flex items-center justify-between text-neutral-400"
                   >
-                    <span className="text-xs">Trống (BOT tự động tham gia nếu thiếu)</span>
+                    <span className="text-xs">Vị trí còn trống (Đang chờ người chơi tham gia)</span>
                     {currentTeam !== 'red' && (
                       <button
                         type="button"
@@ -323,7 +323,7 @@ export const WaitingRoom: React.FC<WaitingRoomProps> = ({
                     key={`blue_empty_${idx}`}
                     className="p-3 rounded-lg border border-dashed border-neutral-800/80 bg-neutral-950/30 flex items-center justify-between text-neutral-400"
                   >
-                    <span className="text-xs">Trống (BOT tự động tham gia nếu thiếu)</span>
+                    <span className="text-xs">Vị trí còn trống (Đang chờ người chơi tham gia)</span>
                     {currentTeam !== 'blue' && (
                       <button
                         type="button"
@@ -349,7 +349,7 @@ export const WaitingRoom: React.FC<WaitingRoomProps> = ({
             </span>
           </div>
           <div className="text-neutral-400 text-xs">
-            💡 Mẹo: Hệ thống sẽ tự động thêm BOT chiến thuật nếu chưa đủ người khi bắt đầu để trận đấu luôn đông đủ!
+            💡 Chế độ trực tuyến: Chỉ có người chơi thực tham gia phòng đấu. Hãy gửi mã phòng hoặc link mời cho bạn bè cùng vào so tài!
           </div>
         </div>
 

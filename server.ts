@@ -28,7 +28,7 @@ interface PlayerState {
   health: number;
   kills: number;
   deaths: number;
-  weapon: 'ak47' | 'pistol' | 'knife';
+  weapon: 'usp' | 'pistol' | 'mp9' | 'xm1014' | 'ak47' | 'm4a1s' | 'awp' | 'knife';
   isAlive: boolean;
   ping: number;
   lastActive: number;
@@ -471,7 +471,7 @@ wss.on('connection', (ws: WebSocket) => {
           health: 100,
           kills: 0,
           deaths: 0,
-          weapon: 'ak47',
+          weapon: 'usp',
           isAlive: true,
           ping: 15,
           lastActive: Date.now()
@@ -563,7 +563,7 @@ wss.on('connection', (ws: WebSocket) => {
             health: 100,
             kills: 0,
             deaths: 0,
-            weapon: 'ak47',
+            weapon: 'usp',
             isAlive: true,
             ping: 0,
             lastActive: Date.now()
@@ -591,7 +591,7 @@ wss.on('connection', (ws: WebSocket) => {
             health: 100,
             kills: 0,
             deaths: 0,
-            weapon: 'ak47',
+            weapon: 'usp',
             isAlive: true,
             ping: 0,
             lastActive: Date.now()
@@ -600,6 +600,9 @@ wss.on('connection', (ws: WebSocket) => {
           blueCount++;
         }
 
+        room.round = 0;
+        room.redScore = 0;
+        room.blueScore = 0;
         room.state = 'playing';
         room.roundTimeLeft = 90;
         startNewRound(room);
@@ -667,10 +670,11 @@ wss.on('connection', (ws: WebSocket) => {
 
       else if (type === 'hit_damage') {
         const room = rooms.get(currentRoomCode);
-        if (!room) return;
+        if (!room || room.state !== 'playing') return;
         const target = room.players.get(data.targetId);
-        const attacker = room.players.get(currentPlayerId);
+        const attacker = room.players.get(data.attackerId || currentPlayerId);
         if (!target || !target.isAlive) return;
+        if (attacker && (!attacker.isAlive || attacker.team === target.team)) return;
 
         const rawDamage = Math.max(1, data.damage || 25);
         const damage = Math.max(1, Math.round(rawDamage));
@@ -690,7 +694,7 @@ wss.on('connection', (ws: WebSocket) => {
             victimId: target.id,
             victimName: target.name,
             victimTeam: target.team,
-            weapon: data.weapon,
+            weapon: data.weapon || attacker?.weapon || 'usp',
             isHeadshot,
             room: getRoomSnapshot(room)
           });
@@ -744,7 +748,7 @@ wss.on('connection', (ws: WebSocket) => {
           health: 100,
           kills: 0,
           deaths: 0,
-          weapon: 'ak47',
+          weapon: 'usp',
           isAlive: true,
           ping: 0,
           lastActive: Date.now()
@@ -763,17 +767,19 @@ wss.on('connection', (ws: WebSocket) => {
         const room = rooms.get(currentRoomCode);
         if (!room) return;
         const bot = room.players.get(data.botId);
-        if (bot && bot.isBot) {
+        if (bot && bot.isBot && bot.isAlive) {
           bot.x = data.x;
           bot.y = data.y;
           bot.z = data.z;
           bot.rotY = data.rotY;
           bot.pitch = data.pitch;
-          bot.weapon = data.weapon;
+          bot.weapon = data.weapon || bot.weapon;
 
           broadcastToRoom(room, {
             type: 'player_moved',
             id: bot.id,
+            team: bot.team,
+            name: bot.name,
             x: bot.x,
             y: bot.y,
             z: bot.z,
@@ -838,19 +844,19 @@ wss.on('connection', (ws: WebSocket) => {
       if (room) {
         room.players.delete(currentPlayerId);
         room.wsClients.delete(currentPlayerId);
+        cleanStaleRoomPlayers(room);
 
-        if (room.hostId === currentPlayerId && room.players.size > 0) {
-          const nextHost = room.players.keys().next().value;
-          if (nextHost) {
-            room.hostId = nextHost;
+        if (room.players.size > 0) {
+          broadcastToRoom(room, {
+            type: 'player_left',
+            playerId: currentPlayerId,
+            room: getRoomSnapshot(room)
+          });
+
+          if (room.state === 'playing') {
+            checkRoundStatus(room);
           }
         }
-
-        broadcastToRoom(room, {
-          type: 'player_left',
-          playerId: currentPlayerId,
-          room: getRoomSnapshot(room)
-        });
 
         // If room is empty, clean up after 1 minute
         if (room.players.size === 0) {

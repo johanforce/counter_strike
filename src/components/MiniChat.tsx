@@ -86,22 +86,24 @@ export const MiniChat: React.FC<MiniChatProps> = ({
       {/* 1. Transparent Messages Area (No background box) */}
       <div className="max-h-[140px] overflow-y-auto space-y-1 py-1 pr-1 scrollbar-thin scrollbar-thumb-white/20 scrollbar-track-transparent">
         {messages.slice(-7).map((msg) => {
-          const isRed = msg.senderTeam === 'red';
-          const isBlue = msg.senderTeam === 'blue';
+          const isRed = (msg.senderTeam || msg.team) === 'red';
+          const isBlue = (msg.senderTeam || msg.team) === 'blue';
+          const isSys = msg.isSystem || msg.channel === 'system';
+          const isAllMsg = msg.isAll || msg.channel === 'all';
 
           return (
             <div
               key={msg.id}
               className="leading-tight text-[11px] drop-shadow-[0_1px_2px_rgba(0,0,0,0.95)] drop-shadow-[0_0_2px_rgba(0,0,0,1)] break-words animate-fadeIn"
             >
-              {msg.isSystem ? (
+              {isSys ? (
                 <div className="text-emerald-300 font-bold flex items-center gap-1">
                   <span className="bg-emerald-500/20 text-emerald-300 px-1 py-0.2 rounded text-[9px] border border-emerald-500/40">
                     [HỆ THỐNG]
                   </span>
                   <span>{msg.text}</span>
                 </div>
-              ) : msg.isAll ? (
+              ) : isAllMsg ? (
                 <div>
                   <span className="bg-amber-500/25 text-amber-300 px-1 py-0.2 rounded text-[9px] border border-amber-500/40 font-bold mr-1">
                     [TẤT CẢ]

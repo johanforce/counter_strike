@@ -1,14 +1,20 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { WeaponType, KillFeedEvent, WEAPONS, ChatMessage, Team } from '../types/game';
 import { Shield, Crosshair as CrosshairIcon, RotateCcw, Zap, Compass, ZoomIn, ZoomOut, Navigation, MessageSquare, Send, ShoppingCart, Skull } from 'lucide-react';
+import { BuyMenu } from './BuyMenu';
 
 interface HUDProps {
   health: number;
   armor: number;
+  hasHelmet?: boolean;
   ammo: number;
   reserveAmmo: number;
   weapon: WeaponType;
+  primaryWeapon?: WeaponType | null;
+  secondaryWeapon?: WeaponType;
   isReloading: boolean;
+  isScoped?: boolean;
+  scopeLevel?: number;
   redScore: number;
   blueScore: number;
   round: number;
@@ -31,6 +37,7 @@ interface HUDProps {
   onRequestLock: () => void;
   onOpenSettings: () => void;
   money?: number;
+  moneyRewardNotice?: { amount: number; reason: string } | null;
   chatMessages?: ChatMessage[];
   onSendChatMessage?: (text: string) => void;
   localPlayerTeam?: Team;
@@ -97,10 +104,15 @@ function getLocationName(x: number, z: number): string {
 export const HUD: React.FC<HUDProps> = ({
   health,
   armor,
+  hasHelmet = false,
   ammo,
   reserveAmmo,
   weapon,
+  primaryWeapon = null,
+  secondaryWeapon = 'usp',
   isReloading,
+  isScoped = false,
+  scopeLevel = 0,
   redScore,
   blueScore,
   round,
@@ -115,6 +127,7 @@ export const HUD: React.FC<HUDProps> = ({
   onRequestLock,
   onOpenSettings,
   money = 800,
+  moneyRewardNotice = null,
   chatMessages = [],
   onSendChatMessage,
   localPlayerTeam = 'red',
@@ -125,7 +138,7 @@ export const HUD: React.FC<HUDProps> = ({
   onBuyItem,
   headshotEffect = false
 }) => {
-  const currentWeaponData = WEAPONS[weapon];
+  const currentWeaponData = WEAPONS[weapon] || WEAPONS.usp;
   const minutes = Math.floor(timeLeft / 60);
   const seconds = timeLeft % 60;
   const timeFormatted = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
@@ -564,37 +577,37 @@ export const HUD: React.FC<HUDProps> = ({
       )}
 
       {/* 2. Top Match Status Banner */}
-      <div className="absolute top-4 left-1/2 -translate-x-1/2 flex items-center gap-3 bg-black/85 backdrop-blur-md px-6 py-2.5 rounded-md border border-neutral-700 shadow-2xl">
+      <div className="absolute top-3 left-1/2 -translate-x-1/2 flex items-center gap-3 bg-black/85 backdrop-blur-md px-5 py-1.5 rounded-md border border-neutral-700 shadow-2xl z-20">
         {/* Red Team */}
         <div className="flex items-center gap-2">
-          <span className="w-3 h-3 rounded-full bg-red-500 animate-pulse" />
-          <span className="text-red-400 font-bold text-sm tracking-wider">ĐỘI ĐỎ</span>
-          <span className="text-2xl font-black text-red-500 ml-1">{redScore}</span>
+          <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse" />
+          <span className="text-red-400 font-bold text-xs tracking-wider">ĐỘI ĐỎ</span>
+          <span className="text-xl font-black text-red-500 ml-1">{redScore}</span>
         </div>
 
-        <div className="h-6 w-px bg-neutral-700 mx-2" />
+        <div className="h-5 w-px bg-neutral-700 mx-1" />
 
         {/* Round & Timer */}
         <div className="flex flex-col items-center">
-          <span className="text-xs text-neutral-400 uppercase tracking-widest">HIỆP {round}</span>
-          <span className={`text-xl font-black ${timeLeft <= 15 ? 'text-red-400 animate-bounce' : 'text-amber-400'}`}>
+          <span className="text-[10px] text-neutral-400 uppercase tracking-widest">HIỆP {round}</span>
+          <span className={`text-lg font-black leading-tight ${timeLeft <= 15 ? 'text-red-400 animate-bounce' : 'text-amber-400'}`}>
             {timeFormatted}
           </span>
         </div>
 
-        <div className="h-6 w-px bg-neutral-700 mx-2" />
+        <div className="h-5 w-px bg-neutral-700 mx-1" />
 
         {/* Blue Team */}
         <div className="flex items-center gap-2">
-          <span className="text-2xl font-black text-blue-500 mr-1">{blueScore}</span>
-          <span className="text-blue-400 font-bold text-sm tracking-wider">ĐỘI XANH</span>
-          <span className="w-3 h-3 rounded-full bg-blue-500 animate-pulse" />
+          <span className="text-xl font-black text-blue-500 mr-1">{blueScore}</span>
+          <span className="text-blue-400 font-bold text-xs tracking-wider">ĐỘI XANH</span>
+          <span className="w-2.5 h-2.5 rounded-full bg-blue-500 animate-pulse" />
         </div>
       </div>
 
       {/* 3. Top-Left High-Definition Tactical Minimap / Radar */}
-      <div className="absolute top-4 left-4 flex flex-col gap-1.5 pointer-events-auto">
-        <div className="relative w-[190px] h-[190px] bg-black/90 rounded-2xl border-2 border-emerald-500/70 p-1 shadow-2xl overflow-hidden flex items-center justify-center">
+      <div className="absolute top-3 left-3 flex flex-col gap-1 pointer-events-auto z-20">
+        <div className="relative w-[160px] h-[160px] bg-black/90 rounded-2xl border-2 border-emerald-500/70 p-1 shadow-2xl overflow-hidden flex items-center justify-center">
           <canvas
             ref={canvasRef}
             width={190}
@@ -603,10 +616,10 @@ export const HUD: React.FC<HUDProps> = ({
           />
 
           {/* Radar Quick Controls (Rotate view mode & Zoom +/-) */}
-          <div className="absolute top-2 right-2 flex items-center gap-1 bg-black/80 backdrop-blur-md px-1.5 py-0.5 rounded border border-emerald-500/40">
+          <div className="absolute top-1.5 right-1.5 flex items-center gap-1 bg-black/80 backdrop-blur-md px-1.5 py-0.5 rounded border border-emerald-500/40">
             <button
               onClick={() => setRotateRadar(prev => !prev)}
-              className="text-[9px] font-bold text-emerald-400 hover:text-emerald-300 transition-colors flex items-center gap-0.5"
+              className="text-[9px] font-bold text-emerald-400 hover:text-emerald-300 transition-colors flex items-center gap-0.5 cursor-pointer"
               title={rotateRadar ? 'Chế độ xoay theo tầm nhìn (Bấm để cố định Bắc)' : 'Chế độ cố định Bắc (Bấm để xoay theo tầm nhìn)'}
             >
               <Navigation className={`w-2.5 h-2.5 ${rotateRadar ? 'text-emerald-400' : 'text-neutral-400'}`} />
@@ -615,14 +628,14 @@ export const HUD: React.FC<HUDProps> = ({
             <div className="w-px h-2.5 bg-neutral-700" />
             <button
               onClick={() => setZoomLevel(prev => Math.min(1.6, prev + 0.15))}
-              className="text-[10px] font-bold text-neutral-300 hover:text-white px-0.5"
+              className="text-[10px] font-bold text-neutral-300 hover:text-white px-0.5 cursor-pointer"
               title="Phóng to radar"
             >
               +
             </button>
             <button
               onClick={() => setZoomLevel(prev => Math.max(0.8, prev - 0.15))}
-              className="text-[10px] font-bold text-neutral-300 hover:text-white px-0.5"
+              className="text-[10px] font-bold text-neutral-300 hover:text-white px-0.5 cursor-pointer"
               title="Thu nhỏ radar"
             >
               -
@@ -630,55 +643,54 @@ export const HUD: React.FC<HUDProps> = ({
           </div>
 
           {/* Tactical Radar Badge Bottom */}
-          <div className="absolute bottom-1.5 left-1/2 -translate-x-1/2 flex items-center gap-1.5 bg-black/80 px-2 py-0.5 rounded-full border border-emerald-500/30">
+          <div className="absolute bottom-1 left-1/2 -translate-x-1/2 flex items-center gap-1 bg-black/80 px-2 py-0.5 rounded-full border border-emerald-500/30">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
-            <span className="text-[9px] text-emerald-300 font-bold tracking-widest">RADAR TÁC CHIẾN</span>
+            <span className="text-[8px] text-emerald-300 font-bold tracking-widest">RADAR</span>
           </div>
         </div>
 
         {/* Current Location Zone Banner */}
-        <div className="bg-black/85 backdrop-blur-md px-2.5 py-1 rounded border border-neutral-700/80 shadow-lg text-[10.5px] font-bold text-amber-300 tracking-wide text-center truncate max-w-[190px]">
+        <div className="bg-black/85 backdrop-blur-md px-2 py-0.5 rounded border border-neutral-700/80 shadow-lg text-[10px] font-bold text-amber-300 tracking-wide text-center truncate w-[160px]">
           {currentLocation}
         </div>
 
-        {/* CS Money Cash Counter & Buy Button */}
-        <div className="relative flex items-center justify-between px-2.5 py-1.5 max-w-[190px] bg-black/75 rounded-lg border border-emerald-500/40 shadow-lg">
-          <div className="flex items-center gap-1.5">
-            <span className="text-sm font-black font-mono text-emerald-500">$</span>
-            <span className="text-base font-black font-mono tracking-tight text-emerald-400 drop-shadow-[0_0_8px_rgba(52,211,153,0.5)]">
+        {/* CS:GO Money Cash Counter & Buy Button */}
+        <div className="relative flex items-center justify-between px-2 py-1 w-[160px] bg-black/80 rounded-lg border border-emerald-500/40 shadow-lg">
+          <div className="flex items-center gap-1">
+            <span className="text-xs font-black font-mono text-emerald-500">$</span>
+            <span className="text-sm font-black font-mono tracking-tight text-emerald-400 drop-shadow-[0_0_8px_rgba(52,211,153,0.5)]">
               {money.toLocaleString()}
             </span>
           </div>
 
-          <div className="flex items-center gap-1">
-            {coinAnimation && (
-              <span className="text-xs font-bold text-yellow-300 animate-bounce drop-shadow-[0_0_6px_rgba(253,224,71,0.8)]">
-                +$1,000
-              </span>
-            )}
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onToggleBuyMenu?.();
-              }}
-              className="flex items-center gap-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 hover:text-amber-200 px-2 py-0.5 rounded border border-amber-500/50 text-[10px] font-bold tracking-wider transition-colors"
-              title="Mở cửa hàng mua vũ khí & trang bị (Phím B)"
-            >
-              <ShoppingCart className="w-3 h-3 text-amber-400" />
-              <span>CHỢ [B]</span>
-            </button>
-          </div>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleBuyMenu?.();
+            }}
+            className="flex items-center gap-1 bg-amber-500/25 hover:bg-amber-500/40 text-amber-300 hover:text-amber-100 px-2 py-0.5 rounded border border-amber-500/60 text-[10px] font-bold tracking-wider transition-colors cursor-pointer"
+            title="Mở cửa hàng mua vũ khí & trang bị (Phím B)"
+          >
+            <ShoppingCart className="w-3 h-3 text-amber-400" />
+            <span>CHỢ [B]</span>
+          </button>
+
+          {/* Floating Money Reward Notification */}
+          {(moneyRewardNotice || coinAnimation) && (
+            <div className="absolute left-full ml-2 top-1/2 -translate-y-1/2 whitespace-nowrap bg-emerald-950/90 border border-emerald-500/60 px-2 py-0.5 rounded text-[10px] font-black text-emerald-300 shadow-lg animate-bounce">
+              +${(moneyRewardNotice?.amount || 10000).toLocaleString()} {moneyRewardNotice?.reason || ''}
+            </div>
+          )}
         </div>
 
-        {/* Small Transparent Chat Tab Under Radar (No background) */}
-        <div className="flex flex-col w-[290px] max-w-[85vw] select-text pointer-events-auto mt-0.5">
-          {/* Recent Messages Area - Transparent background */}
+        {/* Compact Transparent Chat Tab Under Radar */}
+        <div className="flex flex-col w-[250px] max-w-[75vw] select-text pointer-events-auto mt-0.5">
           <div
             ref={chatScrollRef}
-            className="flex flex-col gap-1 max-h-[140px] overflow-y-auto overflow-x-hidden pr-1 text-[11px] leading-tight [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            className="flex flex-col gap-0.5 max-h-[95px] overflow-y-auto overflow-x-hidden pr-1 text-[10.5px] leading-tight [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           >
             {chatMessages.length > 0 &&
-              chatMessages.slice(-20).map((msg, idx) => {
+              chatMessages.slice(-15).map((msg, idx) => {
                 const isAll = msg.channel === 'all';
                 const isSys = msg.channel === 'system';
                 return (
@@ -708,13 +720,11 @@ export const HUD: React.FC<HUDProps> = ({
               })}
           </div>
 
-          {/* Transparent Chat Input Bar */}
           <form
             onSubmit={handleSubmitChat}
-            className="flex items-center gap-1.5 mt-1 border-b border-white/30 focus-within:border-amber-400 transition-colors py-0.5 bg-black/20 focus-within:bg-black/40 rounded-sm px-1"
+            className="flex items-center gap-1.5 mt-0.5 border-b border-white/30 focus-within:border-amber-400 transition-colors py-0.5 bg-black/20 focus-within:bg-black/50 rounded-sm px-1"
           >
-            {/* Dynamic channel badge indicator */}
-            <span className="text-[10px] font-bold shrink-0 select-none">
+            <span className="text-[9.5px] font-bold shrink-0 select-none">
               {chatInput.toLowerCase().startsWith('/all ') || chatInput.toLowerCase() === '/all' ? (
                 <span className="text-amber-400 font-black tracking-wider">[TẤT CẢ]</span>
               ) : (
@@ -748,63 +758,91 @@ export const HUD: React.FC<HUDProps> = ({
               }}
               placeholder="Nhấn Enter để chat..."
               maxLength={120}
-              className="w-full bg-transparent text-[11px] text-white placeholder-neutral-400/80 focus:outline-none drop-shadow-[0_1px_2px_rgba(0,0,0,1)] font-mono"
+              className="w-full bg-transparent text-[10.5px] text-white placeholder-neutral-400/80 focus:outline-none drop-shadow-[0_1px_2px_rgba(0,0,0,1)] font-mono"
             />
           </form>
         </div>
       </div>
 
       {/* 4. Top-Right Killfeed */}
-      <div className="absolute top-4 right-4 flex flex-col gap-1.5 max-w-sm pointer-events-none">
-        {killFeed.slice(-5).map((kf) => (
-          <div
-            key={kf.id}
-            className="flex items-center gap-2 bg-black/80 backdrop-blur-sm px-3 py-1 rounded border border-neutral-800 text-xs shadow-md animate-fade-in"
-          >
-            <span className={kf.killerTeam === 'red' ? 'text-red-400 font-bold' : 'text-blue-400 font-bold'}>
-              {kf.killerName}
-            </span>
-            <span className={`text-[11px] px-1.5 py-0.5 rounded font-bold ${kf.weapon === 'knife' ? 'bg-amber-950/80 text-amber-300 border border-amber-800/60' : 'bg-neutral-800/80 text-neutral-400'}`}>
-              {kf.weapon === 'knife' ? '🔪 ' + WEAPONS[kf.weapon].vietnameseName : WEAPONS[kf.weapon].vietnameseName}
-            </span>
-            {kf.isHeadshot && (
-              <span className="text-red-500 font-black text-xs" title="Headshot!">
-                🎯
+      <div className="absolute top-3 right-3 flex flex-col gap-1 max-w-xs pointer-events-none z-20">
+        {killFeed.slice(-5).map((kf) => {
+          const kfWeapon = WEAPONS[kf.weapon] || WEAPONS.ak47;
+          return (
+            <div
+              key={kf.id}
+              className="flex items-center gap-1.5 bg-black/80 backdrop-blur-sm px-2.5 py-1 rounded border border-neutral-800 text-[11px] shadow-md animate-fade-in"
+            >
+              <span className={kf.killerTeam === 'red' ? 'text-red-400 font-bold truncate max-w-[90px]' : 'text-blue-400 font-bold truncate max-w-[90px]'}>
+                {kf.killerName}
               </span>
-            )}
-            <span className="text-neutral-500">→</span>
-            <span className={kf.victimTeam === 'red' ? 'text-red-400 font-bold' : 'text-blue-400 font-bold'}>
-              {kf.victimName}
-            </span>
-          </div>
-        ))}
+              <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${kf.weapon === 'knife' ? 'bg-amber-950/80 text-amber-300 border border-amber-800/60' : 'bg-neutral-800/80 text-neutral-300'}`}>
+                {kf.weapon === 'knife' ? '🔪 ' + kfWeapon.name : kfWeapon.name}
+              </span>
+              {kf.isHeadshot && (
+                <span className="text-red-500 font-black text-xs" title="Headshot!">
+                  🎯
+                </span>
+              )}
+              <span className="text-neutral-500">→</span>
+              <span className={kf.victimTeam === 'red' ? 'text-red-400 font-bold truncate max-w-[90px]' : 'text-blue-400 font-bold truncate max-w-[90px]'}>
+                {kf.victimName}
+              </span>
+            </div>
+          );
+        })}
       </div>
 
-      {/* 5. Center Dynamic Crosshair (Weapon-Specific: Gun vs Melee Knife) */}
-      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-        {!isKnife ? (
-          /* Gun Crosshair (AK-47 / Pistol) */
-          <div className="relative w-8 h-8 flex items-center justify-center">
-            <div className="absolute -top-3 w-0.5 h-2.5 bg-emerald-400 shadow-[0_0_4px_#34d399]" />
-            <div className="absolute -bottom-3 w-0.5 h-2.5 bg-emerald-400 shadow-[0_0_4px_#34d399]" />
-            <div className="absolute -left-3 h-0.5 w-2.5 bg-emerald-400 shadow-[0_0_4px_#34d399]" />
-            <div className="absolute -right-3 h-0.5 w-2.5 bg-emerald-400 shadow-[0_0_4px_#34d399]" />
-            <div className="w-1 h-1 bg-emerald-400 rounded-full" />
+      {/* 5A. AWP Sniper Scope Overlay */}
+      {isScoped && weapon === 'awp' && !isDead && (
+        <div className="absolute inset-0 pointer-events-none z-10 flex items-center justify-center">
+          {/* Darkened outer scope mask */}
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_28%,rgba(0,0,0,0.96)_31%)]" />
+          {/* Scope Ring Bezel */}
+          <div className="relative w-[58vh] h-[58vh] rounded-full border-4 border-neutral-900 shadow-[0_0_60px_rgba(0,0,0,1)] flex items-center justify-center">
+            {/* Horizontal & Vertical Hairlines */}
+            <div className="absolute inset-x-0 h-[1px] bg-black/90" />
+            <div className="absolute inset-y-0 w-[1px] bg-black/90" />
+            {/* Thick outer stadia bars */}
+            <div className="absolute left-0 w-[18%] h-[3px] bg-black" />
+            <div className="absolute right-0 w-[18%] h-[3px] bg-black" />
+            <div className="absolute top-0 h-[18%] w-[3px] bg-black" />
+            <div className="absolute bottom-0 h-[18%] w-[3px] bg-black" />
+            {/* Center red illuminated dot */}
+            <div className="w-1.5 h-1.5 rounded-full bg-red-500 shadow-[0_0_6px_#ef4444]" />
+            {/* Scope Zoom Indicator */}
+            <div className="absolute bottom-6 bg-black/80 border border-emerald-500/40 px-2.5 py-0.5 rounded text-[10px] text-emerald-400 font-bold tracking-widest">
+              AWP OPTICS • ZOOM {scopeLevel === 2 ? '8X' : '3.5X'}
+            </div>
           </div>
-        ) : (
-          /* Knife Melee Crosshair: Tactical brackets around center point */
-          <div className="relative w-10 h-10 flex items-center justify-center">
-            {/* Top-Left Bracket */}
-            <div className="absolute top-0 left-0 w-2.5 h-2.5 border-t-2 border-l-2 border-amber-400 shadow-[0_0_5px_#f59e0b]" />
-            {/* Top-Right Bracket */}
-            <div className="absolute top-0 right-0 w-2.5 h-2.5 border-t-2 border-r-2 border-amber-400 shadow-[0_0_5px_#f59e0b]" />
-            {/* Bottom-Left Bracket */}
-            <div className="absolute bottom-0 left-0 w-2.5 h-2.5 border-b-2 border-l-2 border-amber-400 shadow-[0_0_5px_#f59e0b]" />
-            {/* Bottom-Right Bracket */}
-            <div className="absolute bottom-0 right-0 w-2.5 h-2.5 border-b-2 border-r-2 border-amber-400 shadow-[0_0_5px_#f59e0b]" />
-            {/* Center melee dot */}
-            <div className="w-1.5 h-1.5 bg-amber-400 rounded-full shadow-[0_0_4px_#f59e0b]" />
-          </div>
+        </div>
+      )}
+
+      {/* 5B. M4A1-S Tactical ADS Sight Overlay */}
+      {isScoped && weapon === 'm4a1s' && !isDead && (
+        <div className="absolute inset-0 pointer-events-none z-10 bg-[radial-gradient(circle_at_center,transparent_55%,rgba(0,0,0,0.45)_100%)]" />
+      )}
+
+      {/* 5C. Center Dynamic Crosshair */}
+      <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-20">
+        {!(isScoped && weapon === 'awp') && (
+          !isKnife ? (
+            <div className="relative w-8 h-8 flex items-center justify-center">
+              <div className="absolute -top-3 w-0.5 h-2.5 bg-emerald-400 shadow-[0_0_4px_#34d399]" />
+              <div className="absolute -bottom-3 w-0.5 h-2.5 bg-emerald-400 shadow-[0_0_4px_#34d399]" />
+              <div className="absolute -left-3 h-0.5 w-2.5 bg-emerald-400 shadow-[0_0_4px_#34d399]" />
+              <div className="absolute -right-3 h-0.5 w-2.5 bg-emerald-400 shadow-[0_0_4px_#34d399]" />
+              <div className="w-1 h-1 bg-emerald-400 rounded-full" />
+            </div>
+          ) : (
+            <div className="relative w-10 h-10 flex items-center justify-center">
+              <div className="absolute top-0 left-0 w-2.5 h-2.5 border-t-2 border-l-2 border-amber-400 shadow-[0_0_5px_#f59e0b]" />
+              <div className="absolute top-0 right-0 w-2.5 h-2.5 border-t-2 border-r-2 border-amber-400 shadow-[0_0_5px_#f59e0b]" />
+              <div className="absolute bottom-0 left-0 w-2.5 h-2.5 border-b-2 border-l-2 border-amber-400 shadow-[0_0_5px_#f59e0b]" />
+              <div className="absolute bottom-0 right-0 w-2.5 h-2.5 border-b-2 border-r-2 border-amber-400 shadow-[0_0_5px_#f59e0b]" />
+              <div className="w-1.5 h-1.5 bg-amber-400 rounded-full shadow-[0_0_4px_#f59e0b]" />
+            </div>
+          )
         )}
 
         {/* Hitmarker X Animation */}
@@ -814,21 +852,25 @@ export const HUD: React.FC<HUDProps> = ({
           </div>
         )}
 
-        {/* Headshot Elimination Special FX: Pulsing Skull Icon & Shockwave Ring */}
+        {/* Headshot Elimination Special FX */}
         {headshotEffect && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-50">
-            {/* Red radial flash aura */}
-            <div className="absolute w-36 h-36 rounded-full bg-red-600/30 animate-ping" />
-            <div className="absolute w-24 h-24 rounded-full border-2 border-red-500/80 animate-pulse" />
-            
-            {/* Center Headshot Icon & Text */}
-            <div className="flex flex-col items-center justify-center animate-bounce drop-shadow-[0_0_16px_rgba(239,68,68,1)]">
-              <div className="flex items-center gap-1.5 bg-black/90 px-3 py-1 rounded-full border border-red-500 shadow-2xl">
-                <Skull className="w-5 h-5 text-red-500 animate-pulse" />
-                <span className="text-xs font-black tracking-widest text-red-400 uppercase">
-                  HEADSHOT!
-                </span>
-                <span className="text-xs font-black text-yellow-400">🎯</span>
+            <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_35%,rgba(220,38,38,0.38)_100%)] animate-pulse pointer-events-none" />
+            <div className="absolute w-44 h-44 rounded-full bg-red-600/30 animate-ping" />
+            <div className="absolute w-32 h-32 rounded-full border-2 border-red-500/80 animate-pulse" />
+
+            <div className="flex flex-col items-center justify-center animate-headshot-pop drop-shadow-[0_0_24px_rgba(239,68,68,1)]">
+              <div className="flex items-center gap-2.5 bg-black/95 px-4 py-1.5 rounded-full border-2 border-red-500 shadow-[0_0_24px_rgba(239,68,68,0.8)]">
+                <Skull className="w-5 h-5 text-red-500 animate-pulse drop-shadow-[0_0_8px_#ef4444]" />
+                <div className="flex flex-col items-start leading-none">
+                  <span className="text-xs font-black tracking-widest text-red-400 uppercase font-mono drop-shadow-[0_0_6px_#ef4444]">
+                    HEADSHOT!
+                  </span>
+                  <span className="text-[9px] font-bold text-amber-300 tracking-wider font-mono mt-0.5">
+                    PHÁT BẮN VÀO ĐẦU
+                  </span>
+                </div>
+                <span className="text-sm select-none">🎯</span>
               </div>
             </div>
           </div>
@@ -837,29 +879,28 @@ export const HUD: React.FC<HUDProps> = ({
 
       {/* Reloading notification */}
       {isReloading && (
-        <div className="absolute top-2/3 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-black/85 px-4 py-1.5 rounded border border-amber-500/60 text-amber-400 text-sm animate-pulse">
-          <RotateCcw className="w-4 h-4 animate-spin" />
+        <div className="absolute top-2/3 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-black/85 px-4 py-1.5 rounded border border-amber-500/60 text-amber-400 text-xs animate-pulse z-20">
+          <RotateCcw className="w-3.5 h-3.5 animate-spin" />
           <span>ĐANG NẠP ĐẠN...</span>
         </div>
       )}
 
-      {/* 6. Bottom-Left: Retro Health & Armor Display with Progress Gauges */}
-      <div className="absolute bottom-6 left-6 flex items-center gap-5 bg-black/85 backdrop-blur-md p-3.5 rounded-xl border border-neutral-700 shadow-2xl">
+      {/* 6. Bottom-Left: Retro Health & Armor Display */}
+      <div className="absolute bottom-4 left-4 flex items-center gap-4 bg-black/85 backdrop-blur-md px-3.5 py-2.5 rounded-xl border border-neutral-700 shadow-2xl z-20">
         {/* Health Section */}
         <div className="flex flex-col gap-1">
-          <div className="flex items-center gap-2">
-            <span className={`text-2xl font-black ${isLowHealth ? 'text-red-500 animate-pulse' : 'text-emerald-400'}`}>
+          <div className="flex items-center gap-1.5">
+            <span className={`text-xl font-black ${isLowHealth ? 'text-red-500 animate-pulse' : 'text-emerald-400'}`}>
               +
             </span>
             <div className="flex flex-col">
-              <span className="text-[10px] text-neutral-400 tracking-wider">MÁU (HP)</span>
-              <span className={`text-3xl font-black tracking-tight leading-none ${isLowHealth ? 'text-red-500' : 'text-emerald-400'}`}>
+              <span className="text-[9px] text-neutral-400 tracking-wider">MÁU (HP)</span>
+              <span className={`text-2xl font-black tracking-tight leading-none ${isLowHealth ? 'text-red-500' : 'text-emerald-400'}`}>
                 {health}
               </span>
             </div>
           </div>
-          {/* Health Bar */}
-          <div className="w-24 h-1.5 bg-neutral-800 rounded-full overflow-hidden">
+          <div className="w-20 h-1.5 bg-neutral-800 rounded-full overflow-hidden">
             <div
               className={`h-full transition-all duration-200 ${isLowHealth ? 'bg-red-500' : 'bg-emerald-400'}`}
               style={{ width: `${Math.max(0, Math.min(100, health))}%` }}
@@ -867,21 +908,22 @@ export const HUD: React.FC<HUDProps> = ({
           </div>
         </div>
 
-        <div className="h-10 w-px bg-neutral-700" />
+        <div className="h-8 w-px bg-neutral-700" />
 
         {/* Armor Section */}
         <div className="flex flex-col gap-1">
-          <div className="flex items-center gap-2">
-            <Shield className="w-5 h-5 text-sky-400" />
+          <div className="flex items-center gap-1.5">
+            <Shield className="w-4 h-4 text-sky-400" />
             <div className="flex flex-col">
-              <span className="text-[10px] text-neutral-400 tracking-wider">GIÁP</span>
-              <span className="text-3xl font-black text-sky-400 tracking-tight leading-none">
+              <span className="text-[9px] text-neutral-400 tracking-wider">
+                GIÁP {hasHelmet ? '+ MŨ' : ''}
+              </span>
+              <span className="text-2xl font-black text-sky-400 tracking-tight leading-none">
                 {armor}
               </span>
             </div>
           </div>
-          {/* Armor Bar */}
-          <div className="w-20 h-1.5 bg-neutral-800 rounded-full overflow-hidden">
+          <div className="w-16 h-1.5 bg-neutral-800 rounded-full overflow-hidden">
             <div
               className="h-full bg-sky-400 transition-all duration-200"
               style={{ width: `${Math.max(0, Math.min(100, armor))}%` }}
@@ -890,31 +932,51 @@ export const HUD: React.FC<HUDProps> = ({
         </div>
       </div>
 
-      {/* 7. Bottom-Center: Weapon Slot Selector Bar */}
-      <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-black/85 backdrop-blur-md px-3 py-2 rounded-lg border border-neutral-700 shadow-2xl">
-        {(['ak47', 'pistol', 'knife'] as WeaponType[]).map((wKey, idx) => {
-          const w = WEAPONS[wKey];
-          const active = weapon === wKey;
-          return (
-            <div
-              key={wKey}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded transition-all ${
-                active
-                  ? 'bg-amber-500/25 border border-amber-500 text-amber-300 scale-105 shadow-[0_0_10px_rgba(245,158,11,0.3)]'
-                  : 'bg-neutral-800/40 border border-transparent text-neutral-400'
-              }`}
-            >
-              <span className="text-xs font-bold text-neutral-400 bg-neutral-700/80 px-1.5 py-0.5 rounded">
-                {idx + 1}
-              </span>
-              <span className="text-xs font-semibold uppercase">{w.vietnameseName}</span>
-            </div>
-          );
-        })}
+      {/* 7. Bottom-Center: CS:GO 3-Slot Weapon Bar (1: Primary, 2: Pistol, 3: Knife) */}
+      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-1.5 bg-black/85 backdrop-blur-md px-2.5 py-1.5 rounded-lg border border-neutral-700 shadow-2xl z-20">
+        {/* Slot 1: Primary Weapon */}
+        <div
+          className={`flex items-center gap-1.5 px-2.5 py-1 rounded transition-all ${
+            primaryWeapon && weapon === primaryWeapon
+              ? 'bg-amber-500/25 border border-amber-500 text-amber-300 scale-105 shadow-[0_0_10px_rgba(245,158,11,0.3)]'
+              : primaryWeapon
+              ? 'bg-neutral-800/60 border border-transparent text-neutral-300'
+              : 'bg-neutral-900/50 border border-dashed border-neutral-700 text-neutral-600'
+          }`}
+        >
+          <span className="text-[10px] font-bold text-neutral-300 bg-neutral-700/80 px-1.5 py-0.5 rounded">1</span>
+          <span className="text-[11px] font-semibold uppercase">
+            {primaryWeapon ? WEAPONS[primaryWeapon].name : 'MUA SÚNG [B]'}
+          </span>
+        </div>
+
+        {/* Slot 2: Secondary Pistol */}
+        <div
+          className={`flex items-center gap-1.5 px-2.5 py-1 rounded transition-all ${
+            weapon === secondaryWeapon
+              ? 'bg-amber-500/25 border border-amber-500 text-amber-300 scale-105 shadow-[0_0_10px_rgba(245,158,11,0.3)]'
+              : 'bg-neutral-800/60 border border-transparent text-neutral-300'
+          }`}
+        >
+          <span className="text-[10px] font-bold text-neutral-300 bg-neutral-700/80 px-1.5 py-0.5 rounded">2</span>
+          <span className="text-[11px] font-semibold uppercase">{WEAPONS[secondaryWeapon].name}</span>
+        </div>
+
+        {/* Slot 3: Knife */}
+        <div
+          className={`flex items-center gap-1.5 px-2.5 py-1 rounded transition-all ${
+            weapon === 'knife'
+              ? 'bg-amber-500/25 border border-amber-500 text-amber-300 scale-105 shadow-[0_0_10px_rgba(245,158,11,0.3)]'
+              : 'bg-neutral-800/60 border border-transparent text-neutral-300'
+          }`}
+        >
+          <span className="text-[10px] font-bold text-neutral-300 bg-neutral-700/80 px-1.5 py-0.5 rounded">3</span>
+          <span className="text-[11px] font-semibold uppercase">{WEAPONS.knife.vietnameseName}</span>
+        </div>
       </div>
 
       {/* 8. Bottom-Right: Ammo / Melee Tactical Counter */}
-      <div className="absolute bottom-6 right-6 flex items-center gap-3 bg-black/85 backdrop-blur-md px-5 py-3.5 rounded-lg border border-neutral-700 shadow-2xl">
+      <div className="absolute bottom-4 right-4 flex items-center gap-3 bg-black/85 backdrop-blur-md px-4 py-2.5 rounded-lg border border-neutral-700 shadow-2xl z-20">
         <div className="flex flex-col items-end">
           <span className="text-[10px] text-neutral-400 tracking-wider uppercase flex items-center gap-1">
             {isKnife && <Zap className="w-3 h-3 text-amber-400" />}
@@ -925,7 +987,7 @@ export const HUD: React.FC<HUDProps> = ({
               <>
                 {isGodMode ? (
                   <div className="flex items-center gap-2">
-                    <span className="text-4xl font-black text-yellow-400 tracking-tighter drop-shadow-[0_0_10px_rgba(250,204,21,0.8)]">
+                    <span className="text-3xl font-black text-yellow-400 tracking-tighter drop-shadow-[0_0_10px_rgba(250,204,21,0.8)]">
                       ∞ / ∞
                     </span>
                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-300 border border-yellow-500/50 font-bold uppercase tracking-widest animate-pulse">
@@ -934,18 +996,18 @@ export const HUD: React.FC<HUDProps> = ({
                   </div>
                 ) : (
                   <>
-                    <span className={`text-4xl font-black tracking-tighter ${ammo <= 5 ? 'text-red-500 animate-pulse' : 'text-amber-400'}`}>
+                    <span className={`text-3xl font-black tracking-tighter ${ammo <= 5 ? 'text-red-500 animate-pulse' : 'text-amber-400'}`}>
                       {ammo}
                     </span>
-                    <span className="text-lg text-neutral-500">/</span>
-                    <span className="text-xl font-bold text-neutral-400">{reserveAmmo}</span>
+                    <span className="text-base text-neutral-500">/</span>
+                    <span className="text-lg font-bold text-neutral-400">{reserveAmmo}</span>
                   </>
                 )}
               </>
             ) : (
               <div className="flex flex-col items-end">
-                <span className="text-lg font-black text-amber-400 tracking-wider">CHÉM CẬN CHIẾN</span>
-                <span className="text-[11px] text-neutral-400">Chuột Trái: Chém • Chuột Phải: Đâm</span>
+                <span className="text-base font-black text-amber-400 tracking-wider">CHÉM CẬN CHIẾN</span>
+                <span className="text-[10px] text-neutral-400">Chuột Trái: Chém • Chuột Phải: Đâm</span>
               </div>
             )}
           </div>
@@ -954,15 +1016,17 @@ export const HUD: React.FC<HUDProps> = ({
 
       {/* 9. Death Screen */}
       {isDead && (
-        <div className="absolute inset-0 bg-red-950/75 backdrop-blur-sm flex flex-col items-center justify-center pointer-events-auto">
-          <h2 className="text-5xl font-black text-red-500 tracking-widest mb-2 animate-pulse">
+        <div className="absolute inset-0 bg-red-950/65 backdrop-blur-sm flex flex-col items-center justify-center pointer-events-auto z-30">
+          <h2 className="text-4xl sm:text-5xl font-black text-red-500 tracking-widest mb-2 animate-pulse">
             BẠN ĐÃ BỊ HẠ GỤC
           </h2>
-          <p className="text-neutral-300 text-lg mb-4">Hồi sinh sau: {respawnTimer} giây</p>
+          <p className="text-neutral-200 text-sm sm:text-base mb-4">
+            Đang chờ kết thúc hiệp đấu để bước sang hiệp mới...
+          </p>
           <div className="w-48 h-1.5 bg-neutral-800 rounded-full overflow-hidden">
             <div
               className="h-full bg-red-500 transition-all duration-300"
-              style={{ width: `${((3 - respawnTimer) / 3) * 100}%` }}
+              style={{ width: `${Math.max(15, ((4 - respawnTimer) / 4) * 100)}%` }}
             />
           </div>
         </div>
@@ -970,210 +1034,49 @@ export const HUD: React.FC<HUDProps> = ({
 
       {/* 10. Round Victory / Defeat Announcement Banner */}
       {roundStatus.show && (
-        <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 flex flex-col items-center bg-black/90 border-2 border-amber-500 px-10 py-6 rounded-xl shadow-2xl animate-bounce pointer-events-none">
-          <span className="text-4xl font-black text-amber-400 mb-2">
+        <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 flex flex-col items-center bg-black/90 border-2 border-amber-500 px-8 py-5 rounded-xl shadow-2xl animate-bounce pointer-events-none z-40">
+          <span className="text-3xl sm:text-4xl font-black text-amber-400 mb-1.5 text-center">
             {roundStatus.winner === 'red' ? 'ĐỘI ĐỎ THẮNG HIỆP' : roundStatus.winner === 'blue' ? 'ĐỘI XANH THẮNG HIỆP' : 'HÒA HIỆP ĐẤU'}
           </span>
-          <span className="text-neutral-300 text-sm tracking-wide">{roundStatus.message}</span>
+          <span className="text-neutral-300 text-xs sm:text-sm tracking-wide text-center">{roundStatus.message}</span>
         </div>
       )}
 
       {/* 11. Sleek Non-Blocking Click-to-Lock Top Bar */}
-      {!isLocked && !isDead && (
+      {!isLocked && !isDead && !isBuyMenuOpen && (
         <div
           onClick={onRequestLock}
-          className="absolute top-16 left-1/2 -translate-x-1/2 bg-amber-950/90 hover:bg-amber-900 border-2 border-amber-500/80 px-6 py-2.5 rounded-full shadow-2xl cursor-pointer pointer-events-auto flex items-center gap-3 transition-transform hover:scale-105"
+          className="absolute top-14 left-1/2 -translate-x-1/2 bg-amber-950/90 hover:bg-amber-900 border-2 border-amber-500/80 px-5 py-2 rounded-full shadow-2xl cursor-pointer pointer-events-auto flex items-center gap-2.5 transition-transform hover:scale-105 z-30"
         >
-          <CrosshairIcon className="w-5 h-5 text-amber-400 animate-spin" style={{ animationDuration: '6s' }} />
+          <CrosshairIcon className="w-4 h-4 text-amber-400 animate-spin shrink-0" style={{ animationDuration: '6s' }} />
           <div className="text-left">
-            <span className="text-xs font-bold text-amber-300 block">
+            <span className="text-[11px] font-bold text-amber-300 block">
               NHẤP VÀO ĐÂY (HOẶC VÀO GAME) ĐỂ KHÓA CHUỘT NGẮM BẮN
             </span>
-            <span className="text-[10px] text-amber-200/80">
-              W, A, S, D di chuyển • Shift: Đi chậm • 1, 2, 3 đổi súng/dao • R: Nạp đạn • Space: Nhảy • C: Ngồi • B: Mua đồ
+            <span className="text-[9.5px] text-amber-200/80 hidden sm:block">
+              WASD: Di chuyển • 1,2,3: Đổi súng • Chuột phải: Ngắm AWP/M4A1-S • B: Chợ mua súng CS:GO
             </span>
           </div>
         </div>
       )}
 
-      {/* 12. Classic CS Tactical Buy Menu (Phím B) */}
-      {isBuyMenuOpen && (
-        <div
-          className="absolute inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center pointer-events-auto z-50 p-4"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) {
-              onToggleBuyMenu?.();
-              onRequestLock();
-            }
-          }}
-        >
-          <div className="bg-neutral-900 border-2 border-amber-500/80 rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-            {/* Header */}
-            <div className="bg-black/90 px-6 py-4 border-b border-amber-500/40 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="p-2 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/40">
-                  <ShoppingCart className="w-6 h-6" />
-                </div>
-                <div>
-                  <h2 className="text-xl font-black text-amber-400 tracking-wider flex items-center gap-2">
-                    CỬA HÀNG VŨ KHÍ & TRANG BỊ
-                    <span className="text-xs px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 font-mono">
-                      PHÍM B
-                    </span>
-                  </h2>
-                  <p className="text-xs text-neutral-400">Chọn trang bị để gia tăng ưu thế trong hiệp đấu</p>
-                </div>
-              </div>
-
-              {/* Current Money */}
-              <div className="flex items-center gap-2 bg-neutral-950 px-4 py-2 rounded-xl border border-emerald-500/50">
-                <span className="text-xs text-neutral-400 font-bold">TIỀN CÓ:</span>
-                <span className="text-lg font-black font-mono text-emerald-400 drop-shadow-[0_0_8px_rgba(52,211,153,0.5)]">
-                  ${money.toLocaleString()}
-                </span>
-              </div>
-            </div>
-
-            {/* Catalog Grid */}
-            <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[60vh] overflow-y-auto">
-              {/* Item: AK-47 */}
-              <div className="bg-neutral-950/80 p-4 rounded-xl border border-neutral-800 hover:border-amber-500/50 transition-colors flex flex-col justify-between">
-                <div>
-                  <div className="flex items-start justify-between mb-2">
-                    <div>
-                      <h3 className="text-base font-black text-amber-300">AK-47 Kalashnikov</h3>
-                      <span className="text-xs text-neutral-400">Súng trường hỏa lực mạnh • 30/90 viên</span>
-                    </div>
-                    <span className="text-sm font-black font-mono text-emerald-400 bg-emerald-950/50 px-2 py-1 rounded border border-emerald-500/30">
-                      $2,700
-                    </span>
-                  </div>
-                  <p className="text-xs text-neutral-400 mb-4">
-                    Sát thương cao, độ chính xác tốt ở tầm xa, hạ gục nhanh chóng khi bắn trúng đầu.
-                  </p>
-                </div>
-                <button
-                  disabled={money < 2700}
-                  onClick={() => onBuyItem?.('ak47')}
-                  className={`w-full py-2 rounded-lg font-black text-xs tracking-wider uppercase transition-colors ${
-                    money >= 2700
-                      ? 'bg-amber-500 hover:bg-amber-400 text-black shadow-lg shadow-amber-500/20'
-                      : 'bg-neutral-800 text-neutral-500 cursor-not-allowed'
-                  }`}
-                >
-                  {money >= 2700 ? 'MUA AK-47 ($2,700)' : 'KHÔNG ĐỦ TIỀN ($2,700)'}
-                </button>
-              </div>
-
-              {/* Item: Desert Eagle */}
-              <div className="bg-neutral-950/80 p-4 rounded-xl border border-neutral-800 hover:border-amber-500/50 transition-colors flex flex-col justify-between">
-                <div>
-                  <div className="flex items-start justify-between mb-2">
-                    <div>
-                      <h3 className="text-base font-black text-amber-300">Desert Eagle .50</h3>
-                      <span className="text-xs text-neutral-400">Súng lục uy lực khủng • 12/36 viên</span>
-                    </div>
-                    <span className="text-sm font-black font-mono text-emerald-400 bg-emerald-950/50 px-2 py-1 rounded border border-emerald-500/30">
-                      $700
-                    </span>
-                  </div>
-                  <p className="text-xs text-neutral-400 mb-4">
-                    Khẩu súng lục cầm tay biểu tượng với uy lực công phá vượt trội và tầm bắn ổn định.
-                  </p>
-                </div>
-                <button
-                  disabled={money < 700}
-                  onClick={() => onBuyItem?.('pistol')}
-                  className={`w-full py-2 rounded-lg font-black text-xs tracking-wider uppercase transition-colors ${
-                    money >= 700
-                      ? 'bg-amber-500 hover:bg-amber-400 text-black shadow-lg shadow-amber-500/20'
-                      : 'bg-neutral-800 text-neutral-500 cursor-not-allowed'
-                  }`}
-                >
-                  {money >= 700 ? 'MUA DESERT EAGLE ($700)' : 'KHÔNG ĐỦ TIỀN ($700)'}
-                </button>
-              </div>
-
-              {/* Item: Kevlar Armor */}
-              <div className="bg-neutral-950/80 p-4 rounded-xl border border-neutral-800 hover:border-amber-500/50 transition-colors flex flex-col justify-between">
-                <div>
-                  <div className="flex items-start justify-between mb-2">
-                    <div className="flex items-center gap-2">
-                      <Shield className="w-4 h-4 text-sky-400" />
-                      <div>
-                        <h3 className="text-base font-black text-sky-400">Giáp Kevlar & Mũ cối</h3>
-                        <span className="text-xs text-neutral-400">Giảm 50% sát thương nhận vào</span>
-                      </div>
-                    </div>
-                    <span className="text-sm font-black font-mono text-emerald-400 bg-emerald-950/50 px-2 py-1 rounded border border-emerald-500/30">
-                      $650
-                    </span>
-                  </div>
-                  <p className="text-xs text-neutral-400 mb-4">
-                    Hấp thụ sát thương đạn và chém, bảo vệ lượng máu quý giá khi giao tranh.
-                  </p>
-                </div>
-                <button
-                  disabled={money < 650 || armor >= 100}
-                  onClick={() => onBuyItem?.('armor')}
-                  className={`w-full py-2 rounded-lg font-black text-xs tracking-wider uppercase transition-colors ${
-                    armor >= 100
-                      ? 'bg-neutral-800 text-neutral-500 cursor-not-allowed'
-                      : money >= 650
-                      ? 'bg-sky-500 hover:bg-sky-400 text-black shadow-lg shadow-sky-500/20'
-                      : 'bg-neutral-800 text-neutral-500 cursor-not-allowed'
-                  }`}
-                >
-                  {armor >= 100 ? 'GIÁP ĐÃ ĐẦY (100)' : money >= 650 ? 'MUA GIÁP ($650)' : 'KHÔNG ĐỦ TIỀN ($650)'}
-                </button>
-              </div>
-
-              {/* Item: Full Ammo Refill */}
-              <div className="bg-neutral-950/80 p-4 rounded-xl border border-neutral-800 hover:border-amber-500/50 transition-colors flex flex-col justify-between">
-                <div>
-                  <div className="flex items-start justify-between mb-2">
-                    <div>
-                      <h3 className="text-base font-black text-amber-300">Băng đạn tiếp tế</h3>
-                      <span className="text-xs text-neutral-400">Nạp đầy đạn dự trữ cho mọi súng</span>
-                    </div>
-                    <span className="text-sm font-black font-mono text-emerald-400 bg-emerald-950/50 px-2 py-1 rounded border border-emerald-500/30">
-                      $200
-                    </span>
-                  </div>
-                  <p className="text-xs text-neutral-400 mb-4">
-                    Tiếp tế đầy đủ đạn dự trữ cho súng trường AK-47 và súng lục Deagle.
-                  </p>
-                </div>
-                <button
-                  disabled={money < 200}
-                  onClick={() => onBuyItem?.('ammo')}
-                  className={`w-full py-2 rounded-lg font-black text-xs tracking-wider uppercase transition-colors ${
-                    money >= 200
-                      ? 'bg-emerald-500 hover:bg-emerald-400 text-black shadow-lg shadow-emerald-500/20'
-                      : 'bg-neutral-800 text-neutral-500 cursor-not-allowed'
-                  }`}
-                >
-                  {money >= 200 ? 'MUA ĐẠN DỰ TRỮ ($200)' : 'KHÔNG ĐỦ TIỀN ($200)'}
-                </button>
-              </div>
-            </div>
-
-            {/* Footer Buttons */}
-            <div className="bg-black/90 px-6 py-3 border-t border-neutral-800 flex items-center justify-between">
-              <span className="text-xs text-neutral-400">Nhấn phím [B] hoặc [ESC] để đóng cửa hàng và trở lại trận đấu</span>
-              <button
-                onClick={() => {
-                  onToggleBuyMenu?.();
-                  onRequestLock();
-                }}
-                className="px-5 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-white text-xs font-bold rounded-lg transition-colors"
-              >
-                ĐÓNG (B / ESC)
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* 12. Tactical CS:GO Buy Menu (Phím B) */}
+      <BuyMenu
+        isOpen={!!isBuyMenuOpen}
+        money={money || 0}
+        currentWeapon={weapon}
+        primaryWeapon={primaryWeapon}
+        secondaryWeapon={secondaryWeapon}
+        currentArmor={armor}
+        hasHelmet={hasHelmet}
+        onBuyItem={(itemId) => {
+          onBuyItem?.(itemId);
+        }}
+        onClose={() => {
+          onToggleBuyMenu?.();
+          onRequestLock();
+        }}
+      />
     </div>
   );
 };

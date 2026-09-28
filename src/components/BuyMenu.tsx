@@ -1,244 +1,323 @@
-import React, { useState, useEffect } from 'react';
-import { CS_BUY_ITEMS, BuyItem, WEAPONS, WeaponType } from '../types/game';
-import { Shield, Zap, Crosshair, DollarSign, X, Check, ShoppingBag, Flame, Sparkles } from 'lucide-react';
-import { sounds } from '../game/audio';
+import React, { useEffect, useState } from 'react';
+import { CS_BUY_ITEMS, WeaponType, WEAPONS } from '../types/game';
+import { Shield, Crosshair, DollarSign, X, Zap, Check } from 'lucide-react';
 
 interface BuyMenuProps {
   isOpen: boolean;
   money: number;
   currentWeapon: WeaponType;
+  primaryWeapon: WeaponType | null;
+  secondaryWeapon: WeaponType;
+  currentArmor: number;
   hasHelmet: boolean;
-  armor: number;
-  timeLeft: number;
-  inBuyZone: boolean;
   onBuyItem: (itemId: string) => void;
   onClose: () => void;
+}
+
+function WeaponSilhouette({ id }: { id: string }) {
+  switch (id) {
+    case 'usp':
+      return (
+        <svg viewBox="0 0 135 44" className="w-26 h-9 fill-current">
+          <path d="M18 12h62v4h44v5H80v3H52l-5 15H33l4-15H18z" />
+        </svg>
+      );
+    case 'pistol':
+      return (
+        <svg viewBox="0 0 120 44" className="w-24 h-9 fill-current">
+          <path d="M24 10h66l6 5v6H56l-5 5v13H35l4-16-15-2z" />
+          <rect x="38" y="13" width="44" height="3" opacity="0.35" fill="#000" />
+        </svg>
+      );
+    case 'mp9':
+      return (
+        <svg viewBox="0 0 140 48" className="w-28 h-9 fill-current">
+          <path d="M22 14h68v5h18v4H90v5H68v16H58V26H44l-4 14H28l4-16H14v-6h8z" />
+        </svg>
+      );
+    case 'xm1014':
+      return (
+        <svg viewBox="0 0 160 44" className="w-32 h-9 fill-current">
+          <path d="M10 20l22-4v-4h84v3h34v4h-34v3H64l-6 8H44l4-8H32l-16 8H8z" />
+        </svg>
+      );
+    case 'm4a1s':
+      return (
+        <svg viewBox="0 0 170 48" className="w-34 h-9 fill-current">
+          <path d="M8 18h22v-3h18v-4h28v4h44v2h42v6h-42v2H86l6 14H80l-6-14H58l-4 12H42l4-12H30v4H8z" />
+        </svg>
+      );
+    case 'ak47':
+      return (
+        <svg viewBox="0 0 170 48" className="w-34 h-9 fill-current">
+          <path d="M8 20l24-3v-4h58v3h38v-3h4v5h18v3h-22v3H88l8 15H84l-8-14H60l-5 12H43l4-12H32l-18 8H8z" />
+        </svg>
+      );
+    case 'awp':
+      return (
+        <svg viewBox="0 0 190 48" className="w-36 h-9 fill-current">
+          <path d="M6 20h26v-3h20v-6h6l4 2h24l4-2h6v6h38v2h50v3h-50v3H92v11H80V23H58l-4 11H42l3-9H32v5H6z" />
+        </svg>
+      );
+    default:
+      return null;
+  }
 }
 
 export const BuyMenu: React.FC<BuyMenuProps> = ({
   isOpen,
   money,
   currentWeapon,
+  primaryWeapon,
+  secondaryWeapon,
+  currentArmor,
   hasHelmet,
-  armor,
-  timeLeft,
-  inBuyZone,
   onBuyItem,
   onClose
 }) => {
-  const [selectedCategory, setSelectedCategory] = useState<'all' | 'rifles' | 'smgs' | 'pistols' | 'gear'>('all');
+  const [activeTab, setActiveTab] = useState<'all' | 'weapons' | 'gear'>('all');
 
-  // Handle hotkeys (1-9 and 0 for quick buying, B and ESC for close)
   useEffect(() => {
     if (!isOpen) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.code === 'Escape' || e.code === 'KeyB' || e.key === 'b') {
-        e.preventDefault();
-        onClose();
-        return;
-      }
-
-      // Quick buy shortcuts
-      const matched = CS_BUY_ITEMS.find(item => item.shortcut === e.key);
-      if (matched) {
-        e.preventDefault();
-        if (money >= matched.price && inBuyZone) {
-          onBuyItem(matched.id);
+      if (/^[0-9]$/.test(e.key)) {
+        const item = CS_BUY_ITEMS.find((it) => it.hotkey === e.key || it.shortcut === e.key);
+        if (item) {
+          e.preventDefault();
+          e.stopPropagation();
+          onBuyItem(item.id);
         }
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, money, inBuyZone, onBuyItem, onClose]);
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [isOpen, onBuyItem, money]);
 
   if (!isOpen) return null;
 
-  const filteredItems = selectedCategory === 'all'
-    ? CS_BUY_ITEMS
-    : CS_BUY_ITEMS.filter(item => item.category === selectedCategory);
+  const filteredItems = CS_BUY_ITEMS.filter((it) => {
+    if (activeTab === 'weapons') return it.category !== 'gear';
+    if (activeTab === 'gear') return it.category === 'gear';
+    return true;
+  });
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md select-none pointer-events-auto">
-      <div className="relative w-full max-w-4xl bg-neutral-950/95 border-2 border-amber-500/80 rounded-2xl shadow-[0_0_50px_rgba(245,158,11,0.25)] flex flex-col max-h-[90vh] overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-        
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-2 sm:p-4 pointer-events-auto select-none overflow-hidden">
+      <div className="w-full max-w-4xl max-h-[94vh] flex flex-col bg-neutral-950/95 border border-amber-500/40 rounded-xl shadow-[0_0_50px_rgba(0,0,0,0.9)] overflow-hidden font-mono">
         {/* Header Bar */}
-        <div className="flex items-center justify-between px-6 py-4 bg-neutral-900/90 border-b border-neutral-800">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-amber-500/10 border border-amber-500/40 rounded-lg">
-              <ShoppingBag className="w-6 h-6 text-amber-400" />
+        <div className="shrink-0 bg-gradient-to-r from-amber-950/70 via-neutral-900 to-neutral-900 px-4 py-2.5 border-b border-amber-500/30 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded bg-amber-500/20 border border-amber-500/50 flex items-center justify-center text-amber-400 shrink-0">
+              <Crosshair className="w-4 h-4" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-xl font-black text-amber-400 tracking-wider uppercase font-mono">
-                  CỬA HÀNG VŨ KHÍ CHIẾN THUẬT
-                </h2>
-                <span className="text-[11px] font-bold px-2 py-0.5 bg-neutral-800 text-neutral-400 rounded border border-neutral-700">
-                  CS BUY MENU
-                </span>
-              </div>
-              <p className="text-xs text-neutral-400">
-                Nhấn phím số [1-9] để mua nhanh • Nhấn [B] hoặc [ESC] để quay lại trận đấu
+              <h2 className="text-sm sm:text-base font-black tracking-wider text-white uppercase leading-tight">
+                CHỢ VŨ KHÍ CS:GO <span className="text-amber-400 text-xs">[PHÍM B]</span>
+              </h2>
+              <p className="text-[10px] text-neutral-400 hidden sm:block">
+                Nhấn phím số <span className="text-amber-300 font-bold">[1 - 0]</span> hoặc click chuột để trang bị nhanh • Sống sót qua hiệp sẽ giữ nguyên súng
               </p>
             </div>
           </div>
 
-          {/* Player Money & Close */}
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-1.5 bg-neutral-900 border border-emerald-500/40 px-4 py-2 rounded-xl shadow-inner">
-              <DollarSign className="w-5 h-5 text-emerald-400" />
-              <span className="text-2xl font-black text-emerald-400 font-mono tracking-tight">
-                ${money.toLocaleString()}
+          <div className="flex items-center gap-2.5">
+            {/* Current Loadout Summary Pill */}
+            <div className="hidden md:flex items-center gap-2 bg-neutral-900/90 border border-neutral-800 px-2.5 py-1 rounded text-[11px]">
+              <span className="text-neutral-500">Súng chính:</span>
+              <span className="text-amber-300 font-bold">
+                {primaryWeapon ? WEAPONS[primaryWeapon].name : 'Chưa có'}
+              </span>
+              <span className="text-neutral-700">|</span>
+              <span className="text-neutral-500">Súng lục:</span>
+              <span className="text-cyan-300 font-bold">{WEAPONS[secondaryWeapon].name}</span>
+            </div>
+
+            {/* Player Balance */}
+            <div className="bg-emerald-950/80 border border-emerald-500/50 px-3 py-1 rounded flex items-center gap-1.5 shadow-inner">
+              <DollarSign className="w-4 h-4 text-emerald-400" />
+              <span className="text-emerald-400 font-black text-base sm:text-lg tracking-wider">
+                {money.toLocaleString()}
               </span>
             </div>
 
             <button
               onClick={onClose}
-              className="p-2 text-neutral-400 hover:text-white hover:bg-neutral-800 rounded-lg border border-neutral-700 transition-colors"
-              title="Đóng cửa hàng (ESC)"
+              className="p-1.5 rounded bg-neutral-800 hover:bg-red-900/60 text-neutral-400 hover:text-white border border-neutral-700 transition-colors cursor-pointer"
+              title="Đóng (B hoặc ESC)"
             >
-              <X className="w-5 h-5" />
+              <X className="w-4 h-4" />
             </button>
           </div>
         </div>
 
-        {/* Category Tabs */}
-        <div className="flex items-center gap-2 px-6 py-3 bg-neutral-900/50 border-b border-neutral-800/80 overflow-x-auto">
-          {[
-            { id: 'all', label: 'Tất Cả Vũ Khí' },
-            { id: 'rifles', label: 'Súng Trường (Rifles)' },
-            { id: 'smgs', label: 'Tiểu Liên & Shotgun' },
-            { id: 'pistols', label: 'Súng Lục (Pistols)' },
-            { id: 'gear', label: 'Trang Bị & Giáp' }
-          ].map(tab => (
+        {/* Category Filter Tabs */}
+        <div className="shrink-0 bg-neutral-900/70 px-4 py-1.5 border-b border-neutral-800 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5">
             <button
-              key={tab.id}
-              onClick={() => setSelectedCategory(tab.id as any)}
-              className={`px-4 py-1.5 rounded-lg text-xs font-bold uppercase transition-all tracking-wider font-mono cursor-pointer ${
-                selectedCategory === tab.id
-                  ? 'bg-amber-500 text-black shadow-lg shadow-amber-500/30'
-                  : 'bg-neutral-800/60 text-neutral-400 hover:text-white hover:bg-neutral-800'
+              onClick={() => setActiveTab('all')}
+              className={`px-3 py-1 rounded text-xs font-bold uppercase transition-colors cursor-pointer ${
+                activeTab === 'all'
+                  ? 'bg-amber-500 text-black'
+                  : 'bg-neutral-800/80 text-neutral-400 hover:text-white'
               }`}
             >
-              {tab.label}
+              Tất cả (1-0)
             </button>
-          ))}
+            <button
+              onClick={() => setActiveTab('weapons')}
+              className={`px-3 py-1 rounded text-xs font-bold uppercase transition-colors cursor-pointer ${
+                activeTab === 'weapons'
+                  ? 'bg-amber-500 text-black'
+                  : 'bg-neutral-800/80 text-neutral-400 hover:text-white'
+              }`}
+            >
+              Súng CS:GO (1-7)
+            </button>
+            <button
+              onClick={() => setActiveTab('gear')}
+              className={`px-3 py-1 rounded text-xs font-bold uppercase transition-colors cursor-pointer ${
+                activeTab === 'gear'
+                  ? 'bg-amber-500 text-black'
+                  : 'bg-neutral-800/80 text-neutral-400 hover:text-white'
+              }`}
+            >
+              Giáp & Đạn (8-0)
+            </button>
+          </div>
+
+          <div className="text-[10px] text-neutral-400 hidden sm:flex items-center gap-3">
+            <span>Khởi đầu Hiệp 1: <strong className="text-emerald-400">$800 + USP-S</strong></span>
+            <span>•</span>
+            <span>Thắng hiệp: <strong className="text-emerald-400">+$3250</strong></span>
+            <span>•</span>
+            <span>Thua hiệp: <strong className="text-amber-400">+$1900</strong></span>
+          </div>
         </div>
 
-        {/* Items Grid */}
-        <div className="p-6 overflow-y-auto grid grid-cols-1 md:grid-cols-2 gap-4 flex-1">
-          {filteredItems.map(item => {
+        {/* Compact Grid of CS:GO Items (Fits screen without scrolling) */}
+        <div className="p-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 flex-1 content-start overflow-y-auto">
+          {filteredItems.map((item) => {
             const canAfford = money >= item.price;
-            const wData = item.weaponType ? WEAPONS[item.weaponType] : null;
-            const isEquipped = item.weaponType === currentWeapon;
-            const isAlreadyMaxGear = (item.id === 'helmet' && hasHelmet && armor >= 100) ||
-                                     (item.id === 'kevlar' && armor >= 100 && !hasHelmet);
+            const wStats = item.weaponId ? WEAPONS[item.weaponId] : null;
+            const isOwned =
+              (item.weaponId && (primaryWeapon === item.weaponId || secondaryWeapon === item.weaponId || currentWeapon === item.weaponId)) ||
+              (item.id === 'kevlar' && currentArmor >= 100) ||
+              (item.id === 'helmet' && currentArmor >= 100 && hasHelmet);
 
             return (
-              <div
+              <button
                 key={item.id}
-                onClick={() => {
-                  if (canAfford && inBuyZone) {
-                    onBuyItem(item.id);
-                  }
-                }}
-                className={`relative group flex flex-col justify-between p-4 rounded-xl border transition-all duration-150 ${
-                  isEquipped
-                    ? 'bg-amber-950/20 border-amber-500/50 shadow-inner'
+                onClick={() => onBuyItem(item.id)}
+                disabled={!canAfford || !!isOwned}
+                className={`group relative flex flex-col justify-between p-2.5 rounded-lg border text-left transition-all ${
+                  isOwned
+                    ? 'bg-emerald-950/25 border-emerald-500/50 cursor-default'
                     : canAfford
-                    ? 'bg-neutral-900/80 hover:bg-neutral-800/90 border-neutral-700/80 hover:border-amber-500/60 cursor-pointer shadow-md hover:scale-[1.01]'
-                    : 'bg-neutral-900/40 border-neutral-800 opacity-55 cursor-not-allowed'
+                    ? 'bg-neutral-900/90 hover:bg-neutral-800 border-neutral-700 hover:border-amber-500/80 cursor-pointer shadow-md'
+                    : 'bg-neutral-900/35 border-neutral-800/70 opacity-55 cursor-not-allowed'
                 }`}
               >
-                {/* Top Info */}
-                <div className="flex items-start justify-between mb-2">
-                  <div className="flex items-center gap-2">
-                    <span className="flex items-center justify-center w-6 h-6 rounded bg-neutral-800 text-amber-400 font-mono font-bold text-xs border border-neutral-700">
-                      {item.shortcut}
+                {/* Top Row: Hotkey + Category Badge + Price */}
+                <div className="flex items-center justify-between w-full mb-1">
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-5 h-5 rounded bg-neutral-800 border border-neutral-600 text-amber-400 font-black text-[11px] flex items-center justify-center">
+                      {item.hotkey}
                     </span>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h3 className="font-bold text-sm text-white group-hover:text-amber-300 transition-colors">
-                          {item.name}
-                        </h3>
-                        {isEquipped && (
-                          <span className="flex items-center gap-0.5 text-[10px] font-bold bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/40">
-                            <Check className="w-3 h-3" /> ĐANG DÙNG
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-xs text-neutral-400 mt-0.5">{item.description}</p>
-                    </div>
+                    <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-neutral-800/90 text-neutral-300">
+                      {item.category === 'pistols'
+                        ? 'SÚNG LỤC'
+                        : item.category === 'smgs'
+                        ? item.id === 'xm1014'
+                          ? 'SHOTGUN'
+                          : 'TIỂU LIÊN'
+                        : item.category === 'rifles'
+                        ? item.id === 'awp'
+                          ? 'BẮN TỈA'
+                          : 'SÚNG TRƯỜNG'
+                        : 'TRANG BỊ'}
+                    </span>
                   </div>
 
-                  {/* Price */}
                   <span
-                    className={`font-mono font-black text-base px-2.5 py-1 rounded-lg ${
-                      canAfford
-                        ? 'bg-emerald-950/60 text-emerald-400 border border-emerald-500/40'
-                        : 'bg-red-950/40 text-red-400 border border-red-500/30'
+                    className={`font-black text-sm tracking-tight ${
+                      isOwned ? 'text-emerald-400' : canAfford ? 'text-emerald-400' : 'text-red-400'
                     }`}
                   >
-                    ${item.price.toLocaleString()}
+                    {isOwned ? 'ĐÃ CÓ' : `$${item.price.toLocaleString()}`}
                   </span>
                 </div>
 
-                {/* Weapon Stats Bar (if firearm) */}
-                {wData && (
-                  <div className="grid grid-cols-4 gap-2 mt-3 pt-3 border-t border-neutral-800 text-[11px] font-mono">
-                    <div className="flex flex-col">
-                      <span className="text-neutral-500">SÁT THƯƠNG</span>
-                      <span className="font-bold text-neutral-300">{wData.damage} {wData.headshotMultiplier >= 3.0 ? '⚡1-Tap' : ''}</span>
+                {/* Middle Row: Name + Silhouette Icon */}
+                <div className="flex items-center justify-between gap-2 my-1">
+                  <div className="min-w-0 flex-1">
+                    <div className="text-white font-black text-sm tracking-wide group-hover:text-amber-300 transition-colors truncate">
+                      {item.name}
                     </div>
-                    <div className="flex flex-col">
-                      <span className="text-neutral-500">BĂNG ĐẠN</span>
-                      <span className="font-bold text-neutral-300">{wData.magSize}/{wData.maxReserveAmmo}</span>
-                    </div>
-                    <div className="flex flex-col">
-                      <span className="text-neutral-500">TỐC ĐỘ</span>
-                      <span className="font-bold text-neutral-300">{Math.round(60000 / wData.fireRate)} RPM</span>
-                    </div>
-                    <div className="flex flex-col">
-                      <span className="text-neutral-500">ĐỘ GIẬT</span>
-                      <span className="font-bold text-neutral-300">{Math.round(wData.recoilKick * 1000)} CS</span>
-                    </div>
+                    <p className="text-[10px] text-neutral-400 line-clamp-1 leading-snug">
+                      {item.description}
+                    </p>
                   </div>
-                )}
 
-                {/* Purchase Button */}
-                <div className="mt-3 flex items-center justify-between">
-                  <span className="text-[11px] text-neutral-500 font-mono">
-                    {canAfford ? 'Nhấp chuột hoặc nhấn phím để mua' : 'Không đủ tiền'}
-                  </span>
-                  <button
-                    disabled={!canAfford}
-                    className={`px-4 py-1.5 rounded-lg text-xs font-bold uppercase transition-all font-mono ${
-                      canAfford
-                        ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-600/20 active:scale-95'
-                        : 'bg-neutral-800 text-neutral-500 cursor-not-allowed'
-                    }`}
-                  >
-                    {isEquipped ? 'Mua Lại' : 'Trang Bị'}
-                  </button>
+                  <div className="shrink-0 text-neutral-300 group-hover:text-amber-400 transition-colors flex items-center justify-center">
+                    {item.weaponId ? (
+                      <WeaponSilhouette id={item.weaponId} />
+                    ) : item.id === 'kevlar' || item.id === 'helmet' ? (
+                      <Shield className="w-7 h-7 text-cyan-400" />
+                    ) : (
+                      <Zap className="w-7 h-7 text-amber-400" />
+                    )}
+                  </div>
                 </div>
-              </div>
+
+                {/* Bottom Row: Weapon Stats Bars or Action Status */}
+                <div className="mt-1.5 pt-1.5 border-t border-neutral-800/80 flex items-center justify-between text-[10px]">
+                  {wStats ? (
+                    <div className="flex items-center gap-2 text-neutral-400">
+                      <span>
+                        ST: <strong className="text-white">{wStats.damage}{wStats.pellets ? `x${wStats.pellets}` : ''}</strong>
+                      </span>
+                      <span>•</span>
+                      <span>
+                        Đạn: <strong className="text-white">{wStats.magSize}/{wStats.maxReserveAmmo}</strong>
+                      </span>
+                      <span>•</span>
+                      <span className="text-emerald-400 font-bold">
+                        +${wStats.killReward}/kill
+                      </span>
+                    </div>
+                  ) : (
+                    <span className="text-neutral-400">Hồi phục & Bảo vệ chiến thuật</span>
+                  )}
+
+                  {isOwned ? (
+                    <span className="text-emerald-400 font-bold flex items-center gap-0.5">
+                      <Check className="w-3 h-3" /> ĐANG DÙNG
+                    </span>
+                  ) : (
+                    <span className={canAfford ? 'text-amber-400 font-bold' : 'text-red-500 font-bold'}>
+                      {canAfford ? 'MUA' : 'THIẾU $'}
+                    </span>
+                  )}
+                </div>
+              </button>
             );
           })}
         </div>
 
-        {/* Footer Bar */}
-        <div className="flex items-center justify-between px-6 py-3 bg-neutral-900 border-t border-neutral-800 text-xs text-neutral-400 font-mono">
-          <div className="flex items-center gap-3">
-            <span className="flex items-center gap-1.5 text-amber-400 font-bold">
-              <Sparkles className="w-4 h-4" /> VÙNG MUA: {inBuyZone ? 'KÍCH HOẠT (Trong Spawn/Đầu Hiệp)' : 'HẾT GIỜ MUA'}
-            </span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span>Thời gian còn lại trong hiệp: <strong className="text-white">{timeLeft}s</strong></span>
-          </div>
+        {/* Footer */}
+        <div className="shrink-0 bg-neutral-900 px-4 py-2 border-t border-neutral-800 flex items-center justify-between text-[11px] text-neutral-400">
+          <span>
+            Mẹo: Nhấn <strong className="text-white">Chuột Phải</strong> khi cầm <strong className="text-amber-400">AWP</strong> hoặc <strong className="text-amber-400">M4A1-S</strong> để bật ống ngắm (Scope).
+          </span>
+          <button
+            onClick={onClose}
+            className="bg-amber-600 hover:bg-amber-500 text-black font-black px-3.5 py-1 rounded transition-colors cursor-pointer uppercase text-xs"
+          >
+            Đóng Chợ (B)
+          </button>
         </div>
-
       </div>
     </div>
   );

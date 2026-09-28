@@ -133,6 +133,199 @@ class SoundEngine {
     }
   }
 
+  // USP-S / M4A1-S: Crisp suppressed tactical "phut-tss" shot
+  public playSilencedShot() {
+    if (this.muted) return;
+    this.init();
+    if (!this.ctx || !this.masterGain) return;
+    const now = this.ctx.currentTime;
+
+    const osc = this.ctx.createOscillator();
+    const oscGain = this.ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(360, now);
+    osc.frequency.exponentialRampToValueAtTime(75, now + 0.065);
+
+    oscGain.gain.setValueAtTime(0.45, now);
+    oscGain.gain.exponentialRampToValueAtTime(0.01, now + 0.07);
+
+    osc.connect(oscGain);
+    oscGain.connect(this.masterGain);
+    osc.start(now);
+    osc.stop(now + 0.08);
+
+    const noise = this.ctx.createBufferSource();
+    const noiseBuffer = this.createNoiseBuffer();
+    if (noiseBuffer) {
+      noise.buffer = noiseBuffer;
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = 'bandpass';
+      filter.frequency.setValueAtTime(2400, now);
+      filter.frequency.exponentialRampToValueAtTime(900, now + 0.06);
+      filter.Q.setValueAtTime(2.5, now);
+
+      const noiseGain = this.ctx.createGain();
+      noiseGain.gain.setValueAtTime(0.55, now);
+      noiseGain.gain.exponentialRampToValueAtTime(0.01, now + 0.065);
+
+      noise.connect(filter);
+      filter.connect(noiseGain);
+      noiseGain.connect(this.masterGain);
+      noise.start(now);
+      noise.stop(now + 0.075);
+    }
+  }
+
+  // MP9 SMG: Snappy high-speed submachine pop
+  public playSMGShot() {
+    if (this.muted) return;
+    this.init();
+    if (!this.ctx || !this.masterGain) return;
+    const now = this.ctx.currentTime;
+
+    const osc = this.ctx.createOscillator();
+    const oscGain = this.ctx.createGain();
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(210, now);
+    osc.frequency.exponentialRampToValueAtTime(55, now + 0.07);
+
+    oscGain.gain.setValueAtTime(0.55, now);
+    oscGain.gain.exponentialRampToValueAtTime(0.01, now + 0.08);
+
+    osc.connect(oscGain);
+    oscGain.connect(this.masterGain);
+    osc.start(now);
+    osc.stop(now + 0.09);
+
+    const noise = this.ctx.createBufferSource();
+    const noiseBuffer = this.createNoiseBuffer();
+    if (noiseBuffer) {
+      noise.buffer = noiseBuffer;
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = 'bandpass';
+      filter.frequency.setValueAtTime(1600, now);
+      filter.Q.setValueAtTime(1.8, now);
+
+      const noiseGain = this.ctx.createGain();
+      noiseGain.gain.setValueAtTime(0.65, now);
+      noiseGain.gain.exponentialRampToValueAtTime(0.01, now + 0.09);
+
+      noise.connect(filter);
+      filter.connect(noiseGain);
+      noiseGain.connect(this.masterGain);
+      noise.start(now);
+      noise.stop(now + 0.1);
+    }
+  }
+
+  // XM1014 Shotgun: Heavy booming 12-gauge blast
+  public playShotgunShot() {
+    if (this.muted) return;
+    this.init();
+    if (!this.ctx || !this.masterGain) return;
+    const now = this.ctx.currentTime;
+
+    const osc = this.ctx.createOscillator();
+    const oscGain = this.ctx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(110, now);
+    osc.frequency.exponentialRampToValueAtTime(22, now + 0.22);
+
+    oscGain.gain.setValueAtTime(0.95, now);
+    oscGain.gain.exponentialRampToValueAtTime(0.01, now + 0.24);
+
+    osc.connect(oscGain);
+    oscGain.connect(this.masterGain);
+    osc.start(now);
+    osc.stop(now + 0.25);
+
+    const noise = this.ctx.createBufferSource();
+    const noiseBuffer = this.createNoiseBuffer();
+    if (noiseBuffer) {
+      noise.buffer = noiseBuffer;
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(1800, now);
+      filter.frequency.exponentialRampToValueAtTime(250, now + 0.24);
+
+      const noiseGain = this.ctx.createGain();
+      noiseGain.gain.setValueAtTime(1.1, now);
+      noiseGain.gain.exponentialRampToValueAtTime(0.01, now + 0.25);
+
+      noise.connect(filter);
+      filter.connect(noiseGain);
+      noiseGain.connect(this.masterGain);
+      noise.start(now);
+      noise.stop(now + 0.26);
+    }
+  }
+
+  // AWP Sniper: Thunderous CS:GO Magnum cannon boom + metallic bolt cycle
+  public playAWPShot() {
+    if (this.muted) return;
+    this.init();
+    if (!this.ctx || !this.masterGain) return;
+    const now = this.ctx.currentTime;
+
+    const osc = this.ctx.createOscillator();
+    const oscGain = this.ctx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(95, now);
+    osc.frequency.exponentialRampToValueAtTime(18, now + 0.38);
+
+    oscGain.gain.setValueAtTime(1.0, now);
+    oscGain.gain.exponentialRampToValueAtTime(0.01, now + 0.42);
+
+    osc.connect(oscGain);
+    oscGain.connect(this.masterGain);
+    osc.start(now);
+    osc.stop(now + 0.44);
+
+    const noise = this.ctx.createBufferSource();
+    const noiseBuffer = this.createNoiseBuffer();
+    if (noiseBuffer) {
+      noise.buffer = noiseBuffer;
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(2200, now);
+      filter.frequency.exponentialRampToValueAtTime(180, now + 0.42);
+
+      const noiseGain = this.ctx.createGain();
+      noiseGain.gain.setValueAtTime(1.2, now);
+      noiseGain.gain.exponentialRampToValueAtTime(0.01, now + 0.44);
+
+      noise.connect(filter);
+      filter.connect(noiseGain);
+      noiseGain.connect(this.masterGain);
+      noise.start(now);
+      noise.stop(now + 0.45);
+    }
+
+    // Bolt-action cycle clack after shot
+    this.playClick(now + 0.45, 700, 0.06);
+    this.playClick(now + 0.62, 950, 0.07);
+  }
+
+  // Scope Zoom lens click
+  public playScopeZoom() {
+    if (this.muted) return;
+    this.init();
+    if (!this.ctx || !this.masterGain) return;
+    const now = this.ctx.currentTime;
+    this.playClick(now, 1100, 0.04);
+    this.playClick(now + 0.04, 1500, 0.04);
+  }
+
+  public playWeaponShot(weapon: string) {
+    if (weapon === 'usp' || weapon === 'm4a1s') this.playSilencedShot();
+    else if (weapon === 'mp9') this.playSMGShot();
+    else if (weapon === 'xm1014') this.playShotgunShot();
+    else if (weapon === 'awp') this.playAWPShot();
+    else if (weapon === 'pistol') this.playPistolShot();
+    else if (weapon === 'ak47') this.playAK47Shot();
+    else this.playKnifeSlash();
+  }
+
   // Knife slash: Air swoosh
   public playKnifeSlash() {
     if (this.muted) return;
@@ -465,6 +658,27 @@ class SoundEngine {
     gain.connect(this.masterGain);
     osc.start(now);
     osc.stop(now + 0.07);
+  }
+
+  // Tactical weapon draw / buy equipment cocking click
+  public playEquipSound() {
+    if (this.muted) return;
+    this.init();
+    if (!this.ctx || !this.masterGain) return;
+    const now = this.ctx.currentTime;
+
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(320, now);
+    osc.frequency.exponentialRampToValueAtTime(880, now + 0.06);
+    osc.frequency.exponentialRampToValueAtTime(440, now + 0.12);
+    gain.gain.setValueAtTime(0.25, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.14);
+    osc.connect(gain);
+    gain.connect(this.masterGain);
+    osc.start(now);
+    osc.stop(now + 0.15);
   }
 }
 

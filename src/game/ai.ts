@@ -80,7 +80,7 @@ export class BotManager {
       meshData,
       health: 100,
       isAlive: true,
-      weapon: 'ak47',
+      weapon: 'usp',
       kills: 0,
       deaths: 0,
       difficulty,
@@ -142,19 +142,42 @@ export class BotManager {
       bot.isAlive = false;
       bot.deaths++;
       bot.deathTimer = 1.5; // Ragdoll/fall down
+      const attackerBot = this.bots.get(attackerId);
+      if (attackerBot) {
+        attackerBot.kills++;
+      }
       return true; // was killed
     }
     return false;
   }
 
-  public respawnBot(bot: BotInstance, spawn: { x: number; y: number; z: number; rotY: number }) {
+  public respawnBot(bot: BotInstance, spawn: { x: number; y: number; z: number; rotY: number }, roundNumber: number = 1) {
     bot.health = 100;
     bot.isAlive = true;
     bot.position.set(spawn.x, spawn.y, spawn.z);
     bot.rotY = spawn.rotY;
-    bot.weapon = 'ak47';
-    bot.meshData.updateWeapon('ak47');
+
+    // CS:GO Round Economy Progression for Bots:
+    // Round 1: Pistol round (USP-S / Desert Eagle)
+    // Round 2: Eco / Force buy (MP9 / XM1014 / Deagle)
+    // Round 3+: Full buy (AK-47 / M4A1-S / AWP)
+    let chosenWeapon: WeaponType = 'usp';
+    if (roundNumber === 1) {
+      chosenWeapon = Math.random() < 0.7 ? 'usp' : 'pistol';
+    } else if (roundNumber === 2) {
+      const pool: WeaponType[] = ['mp9', 'xm1014', 'pistol'];
+      chosenWeapon = pool[Math.floor(Math.random() * pool.length)];
+    } else {
+      const pool: WeaponType[] = bot.team === 'red'
+        ? ['ak47', 'ak47', 'awp', 'mp9']
+        : ['m4a1s', 'm4a1s', 'awp', 'xm1014'];
+      chosenWeapon = pool[Math.floor(Math.random() * pool.length)];
+    }
+
+    bot.weapon = chosenWeapon;
+    bot.meshData.updateWeapon(chosenWeapon);
     bot.meshData.updateHealthTag(100);
+    bot.meshData.mesh.visible = true;
     bot.meshData.mesh.position.set(spawn.x, spawn.y - 1.6, spawn.z);
     bot.meshData.mesh.rotation.set(0, spawn.rotY, 0);
   }
@@ -205,7 +228,7 @@ export class BotManager {
       for (const t of potentialTargets) {
         if (t.isAlive && t.team !== bot.team && t.id !== bot.id) {
           const d = bot.position.distanceTo(t.position);
-          if (d < 45 && d < closestDist) {
+          if (d < 48 && d < closestDist) {
             const eyePos = bot.position.clone().setY(bot.position.y);
             const targetEyePos = t.position.clone();
             if (this.hasLineOfSight(eyePos, targetEyePos)) {
@@ -217,7 +240,7 @@ export class BotManager {
       }
 
       let moveTarget: THREE.Vector3;
-      let moveSpeed = 4.2; // m/s
+      let moveSpeed = 4.4; // m/s
 
       if (activeTarget) {
         // Combat state: Face target
@@ -239,18 +262,19 @@ export class BotManager {
 
         // Weapon logic
         const dist = closestDist;
-        if (dist <= 2.8 && bot.weapon !== 'knife') {
+        if (dist <= 2.6 && bot.weapon !== 'knife') {
           bot.weapon = 'knife';
           bot.meshData.updateWeapon('knife');
         } else if (dist > 3.0 && bot.weapon === 'knife') {
-          bot.weapon = 'ak47';
-          bot.meshData.updateWeapon('ak47');
+          bot.weapon = bot.team === 'red' ? 'ak47' : 'm4a1s';
+          bot.meshData.updateWeapon(bot.weapon);
         }
 
+        const wData = WEAPONS[bot.weapon];
         // Shooting cadence with realistic burst pauses
-        const shootInterval = bot.weapon === 'ak47' ? 150 : bot.weapon === 'pistol' ? 300 : 450;
-        const maxBurst = bot.weapon === 'ak47' ? 3 : 2;
-        const burstPause = bot.difficulty === 'hard' ? 600 : bot.difficulty === 'normal' ? 850 : 1200;
+        const shootInterval = Math.max(120, wData.fireRate * 1.35);
+        const maxBurst = wData.isAutomatic ? 4 : 2;
+        const burstPause = bot.difficulty === 'hard' ? 500 : bot.difficulty === 'normal' ? 750 : 1100;
 
         // Check if bot is in pause between bursts
         if (bot.burstCount >= maxBurst) {
@@ -262,7 +286,7 @@ export class BotManager {
           bot.lastShotTime = now;
 
           // Compute fire direction with fair, human-like spread
-          const spreadFactor = bot.difficulty === 'hard' ? 0.035 : bot.difficulty === 'normal' ? 0.065 : 0.11;
+          const spreadFactor = bot.difficulty === 'hard' ? 0.032 : bot.difficulty === 'normal' ? 0.058 : 0.095;
           const spreadX = (Math.random() - 0.5) * spreadFactor;
           const spreadY = (Math.random() - 0.5) * spreadFactor;
 
@@ -274,9 +298,7 @@ export class BotManager {
             .normalize();
 
           // Sound
-          if (bot.weapon === 'ak47') sounds.playAK47Shot();
-          else if (bot.weapon === 'pistol') sounds.playPistolShot();
-          else sounds.playKnifeSlash();
+          sounds.playWeaponShot(bot.weapon);
 
           this.onBotShoot(bot, eyePos, aimDir);
         }

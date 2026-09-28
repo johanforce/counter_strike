@@ -12,7 +12,8 @@ import {
   GameSettings,
   BotDifficulty,
   RoomState,
-  ChatMessage
+  ChatMessage,
+  CS_BUY_ITEMS
 } from './types/game';
 import { FPSGameEngine } from './game/engine';
 import { HUD } from './components/HUD';
@@ -65,11 +66,16 @@ export default function App() {
 
   // In-Game Live HUD States
   const [health, setHealth] = useState<number>(100);
-  const [armor, setArmor] = useState<number>(100);
-  const [ammo, setAmmo] = useState<number>(30);
-  const [reserveAmmo, setReserveAmmo] = useState<number>(90);
-  const [weapon, setWeapon] = useState<WeaponType>('ak47');
+  const [armor, setArmor] = useState<number>(0);
+  const [hasHelmet, setHasHelmet] = useState<boolean>(false);
+  const [ammo, setAmmo] = useState<number>(12);
+  const [reserveAmmo, setReserveAmmo] = useState<number>(36);
+  const [weapon, setWeapon] = useState<WeaponType>('usp');
+  const [primaryWeapon, setPrimaryWeapon] = useState<WeaponType | null>(null);
+  const [secondaryWeapon, setSecondaryWeapon] = useState<WeaponType>('usp');
   const [isReloading, setIsReloading] = useState<boolean>(false);
+  const [isScoped, setIsScoped] = useState<boolean>(false);
+  const [scopeLevel, setScopeLevel] = useState<number>(0);
   const [redScore, setRedScore] = useState<number>(0);
   const [blueScore, setBlueScore] = useState<number>(0);
   const [round, setRound] = useState<number>(1);
@@ -93,11 +99,18 @@ export default function App() {
   // Scoreboard Tab Key
   const [isScoreboardOpen, setIsScoreboardOpen] = useState<boolean>(false);
 
-  // Economy Money State (CS Currency)
+  // Economy Money State (CS:GO Currency: starts at $800, max $16000)
   const [money, setMoney] = useState<number>(800);
+  const [moneyRewardNotice, setMoneyRewardNotice] = useState<{ amount: number; reason: string } | null>(null);
+  const moneyNoticeTimerRef = useRef<NodeJS.Timeout | null>(null);
   const [isGodMode, setIsGodMode] = useState<boolean>(false);
 
-  // In-Game Tactical Chat Messages (Fresh per room/session)
+  // Tactical Buy Menu & Headshot visual feedback
+  const [isBuyMenuOpen, setIsBuyMenuOpen] = useState<boolean>(false);
+  const [headshotEffect, setHeadshotEffect] = useState<boolean>(false);
+  const headshotTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // In-Game Tactical Chat Messages
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
 
   // Canvas container ref
@@ -121,7 +134,6 @@ export default function App() {
   useEffect(() => {
     if (screen !== 'waiting' || !gameConfig || !gameConfig.isOnline) return;
 
-    // Prevent duplicate sockets if already active
     if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {
       return;
     }
@@ -211,15 +223,97 @@ export default function App() {
     setScreen('lobby');
   };
 
-  // Tab key listener for Scoreboard
+  // Tactical Buy Menu toggle handler
+  const handleToggleBuyMenu = (forceOpen?: boolean) => {
+    setIsBuyMenuOpen((prev) => {
+      const next = typeof forceOpen === 'boolean' ? forceOpen : !prev;
+      if (next) {
+        if (document.pointerLockElement) {
+          document.exitPointerLock();
+        }
+      } else {
+        if (engineRef.current && screen === 'playing' && !isDead) {
+          engineRef.current.requestLock();
+        }
+      }
+      return next;
+    });
+  };
+
+  // Buy weapon / armor / ammo handler (CS:GO Economy)
+  const handleBuyItem = (itemId: string) => {
+    const item = CS_BUY_ITEMS.find((it) => it.id === itemId);
+    if (!item) return;
+
+    if (money < item.price) {
+      return;
+    }
+
+    let success = false;
+    if (item.weaponId) {
+      if (engineRef.current?.buyWeapon(item.weaponId)) {
+        setWeapon(item.weaponId);
+        sounds.playEquipSound();
+        success = true;
+      }
+    } else if (itemId === 'kevlar') {
+      if (engineRef.current?.buyArmor(false)) {
+        setArmor(100);
+        sounds.playCoinSound();
+        success = true;
+      }
+    } else if (itemId === 'helmet') {
+      if (engineRef.current?.buyArmor(true)) {
+        setArmor(100);
+        setHasHelmet(true);
+        sounds.playCoinSound();
+        success = true;
+      }
+    } else if (itemId === 'ammo_primary') {
+      if (engineRef.current?.buyAmmo('primary')) {
+        sounds.playCoinSound();
+        success = true;
+      }
+    } else if (itemId === 'ammo_secondary') {
+      if (engineRef.current?.buyAmmo('secondary')) {
+        sounds.playCoinSound();
+        success = true;
+      }
+    } else if (itemId === 'ammo_all' || itemId === 'ammo') {
+      if (engineRef.current?.buyAmmo('all')) {
+        sounds.playCoinSound();
+        success = true;
+      }
+    }
+
+    if (success) {
+      setMoney((prev) => Math.max(0, prev - item.price));
+    }
+  };
+
+  // Keyboard listeners: Tab for Scoreboard, B for Buy Menu, Esc for Settings / Close Buy
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      const activeTag = document.activeElement?.tagName.toLowerCase();
+      const isInputFocused = activeTag === 'input' || activeTag === 'textarea';
+
       if (e.code === 'Tab') {
         e.preventDefault();
         setIsScoreboardOpen(true);
       }
+
       if (e.code === 'Escape' && screen === 'playing') {
-        setIsSettingsOpen((prev) => !prev);
+        if (isBuyMenuOpen) {
+          handleToggleBuyMenu(false);
+        } else {
+          setIsSettingsOpen((prev) => !prev);
+        }
+      }
+
+      // Hotkey B to toggle Buy Menu when not typing in chat input
+      if ((e.code === 'KeyB' || e.key === 'b' || e.key === 'B') && screen === 'playing' && !isInputFocused) {
+        e.preventDefault();
+        handleToggleBuyMenu();
       }
     };
 
@@ -236,19 +330,24 @@ export default function App() {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [screen]);
+  }, [screen, isBuyMenuOpen, isDead]);
 
   // Mount FPS Game Engine when in 'playing' screen
   useEffect(() => {
     if (screen !== 'playing' || !canvasContainerRef.current || !gameConfig) return;
 
-    // Reset scores & HUD & clean fresh room session
+    // Reset scores & HUD & clean fresh room session (CS:GO Round 1 Pistol Round)
     setHealth(100);
-    setArmor(100);
-    setAmmo(30);
-    setReserveAmmo(90);
-    setWeapon('ak47');
+    setArmor(0);
+    setHasHelmet(false);
+    setAmmo(12);
+    setReserveAmmo(36);
+    setWeapon('usp');
+    setPrimaryWeapon(null);
+    setSecondaryWeapon('usp');
     setIsReloading(false);
+    setIsScoped(false);
+    setScopeLevel(0);
     setRedScore(0);
     setBlueScore(0);
     setRound(1);
@@ -257,7 +356,10 @@ export default function App() {
     setKillFeed([]);
     setChatMessages([]);
     setMoney(800);
+    setMoneyRewardNotice(null);
     setIsGodMode(false);
+    setIsBuyMenuOpen(false);
+    setHeadshotEffect(false);
 
     const engine = new FPSGameEngine(
       canvasContainerRef.current,
@@ -265,10 +367,15 @@ export default function App() {
         onHUDUpdate: (hud) => {
           setHealth(hud.health);
           setArmor(hud.armor);
+          if (hud.hasHelmet !== undefined) setHasHelmet(hud.hasHelmet);
           setAmmo(hud.ammo);
           setReserveAmmo(hud.reserveAmmo);
           setWeapon(hud.weapon);
+          if (hud.primaryWeapon !== undefined) setPrimaryWeapon(hud.primaryWeapon);
+          if (hud.secondaryWeapon !== undefined) setSecondaryWeapon(hud.secondaryWeapon);
           setIsReloading(hud.isReloading);
+          if (hud.isScoped !== undefined) setIsScoped(hud.isScoped);
+          if (hud.scopeLevel !== undefined) setScopeLevel(hud.scopeLevel);
           setRedScore(hud.redScore);
           setBlueScore(hud.blueScore);
           setRound(hud.round);
@@ -277,6 +384,16 @@ export default function App() {
           if (hud.hitMarker) {
             setHitMarker(true);
             setTimeout(() => setHitMarker(false), 90);
+          }
+          if (hud.headshotKill) {
+            setHeadshotEffect(true);
+            sounds.playHeadshot();
+            if (headshotTimerRef.current) {
+              clearTimeout(headshotTimerRef.current);
+            }
+            headshotTimerRef.current = setTimeout(() => {
+              setHeadshotEffect(false);
+            }, 1400);
           }
           setIsDead(hud.isDead);
           setRespawnTimer(hud.respawnTimer);
@@ -298,6 +415,20 @@ export default function App() {
         },
         onChatMessage: (msg) => {
           setChatMessages((prev) => [...prev.slice(-25), msg]);
+        },
+        onBuyMenuToggle: () => {
+          handleToggleBuyMenu();
+        },
+        onMoneyReward: (amount, reason) => {
+          setMoney((prev) => Math.min(16000, prev + amount));
+          sounds.playCoinSound();
+          setMoneyRewardNotice({ amount, reason });
+          if (moneyNoticeTimerRef.current) {
+            clearTimeout(moneyNoticeTimerRef.current);
+          }
+          moneyNoticeTimerRef.current = setTimeout(() => {
+            setMoneyRewardNotice(null);
+          }, 2200);
         }
       },
       {
@@ -333,18 +464,18 @@ export default function App() {
     const trimmed = text.trim();
     if (!trimmed) return;
 
-    // Secret Cheat Command: /coin1000 to increase money by $1000 (hidden from chat)
+    // Secret Cheat Command: /coin10000 to increase money by $10000
     if (
-      trimmed.toLowerCase() === '/coin1000' ||
-      trimmed.toLowerCase() === '/coin 1000' ||
-      trimmed.toLowerCase().startsWith('/coin1000')
+      trimmed.toLowerCase() === '/coin10000' ||
+      trimmed.toLowerCase() === '/coin 10000' ||
+      trimmed.toLowerCase().startsWith('/coin10000')
     ) {
-      setMoney((prev) => prev + 1000);
+      setMoney((prev) => Math.min(16000, prev + 10000));
       sounds.playCoinSound();
       return;
     }
 
-    // Secret Cheat Command: /godmode - Infinite Ammo without reload (hidden from chat)
+    // Secret Cheat Command: /godmode - Infinite Ammo without reload
     if (trimmed.toLowerCase() === '/godmode') {
       const nextGodMode = !isGodMode;
       setIsGodMode(nextGodMode);
@@ -355,7 +486,7 @@ export default function App() {
       return;
     }
 
-    // Normal or /all chat (Real players only)
+    // Normal or /all chat
     if (engineRef.current) {
       engineRef.current.sendChatMessage(trimmed);
     }
@@ -381,6 +512,8 @@ export default function App() {
     setChatMessages([]);
     setMoney(800);
     setIsGodMode(false);
+    setIsBuyMenuOpen(false);
+    setHeadshotEffect(false);
     setIsSettingsOpen(false);
     setScreen('lobby');
   };
@@ -411,7 +544,7 @@ export default function App() {
       )}
 
       {screen === 'playing' && (
-        <div className="relative w-full h-full">
+        <div className={`relative w-full h-full transition-transform duration-75 ${headshotEffect ? 'animate-headshot-shake' : ''}`}>
           {/* 3D WebGL Canvas Container */}
           <div ref={canvasContainerRef} className="w-full h-full cursor-crosshair" />
 
@@ -419,10 +552,15 @@ export default function App() {
           <HUD
             health={health}
             armor={armor}
+            hasHelmet={hasHelmet}
             ammo={ammo}
             reserveAmmo={reserveAmmo}
             weapon={weapon}
+            primaryWeapon={primaryWeapon}
+            secondaryWeapon={secondaryWeapon}
             isReloading={isReloading}
+            isScoped={isScoped}
+            scopeLevel={scopeLevel}
             redScore={redScore}
             blueScore={blueScore}
             round={round}
@@ -437,11 +575,16 @@ export default function App() {
             onRequestLock={handleRequestLock}
             onOpenSettings={() => setIsSettingsOpen(true)}
             money={money}
+            moneyRewardNotice={moneyRewardNotice}
             chatMessages={chatMessages}
             onSendChatMessage={handleSendChatMessage}
             localPlayerTeam={(gameConfig?.isOnline && roomState?.players.find(p => p.id === localPlayerId)?.team) || gameConfig?.team || 'red'}
             onChatFocus={handleChatFocus}
             isGodMode={isGodMode}
+            isBuyMenuOpen={isBuyMenuOpen}
+            onToggleBuyMenu={() => handleToggleBuyMenu()}
+            onBuyItem={handleBuyItem}
+            headshotEffect={headshotEffect}
           />
 
           {/* Scoreboard (Tab overlay) */}
@@ -470,14 +613,22 @@ export default function App() {
                       health: p.health,
                       isBot: !!p.isBot
                     }))
-                : []
+                : engineRef.current?.botManager.getAllBots().map((b) => ({
+                    id: b.id,
+                    name: b.name,
+                    team: b.team,
+                    kills: b.kills,
+                    deaths: b.deaths,
+                    health: b.health,
+                    isBot: true
+                  })) || []
             }
           />
 
           {/* Quick Pause / Exit Button top left */}
           <button
             onClick={() => setIsSettingsOpen(true)}
-            className="absolute top-4 left-44 z-40 bg-black/60 hover:bg-black/90 text-neutral-400 hover:text-white px-2.5 py-1 text-xs rounded border border-neutral-700 pointer-events-auto transition-colors font-mono"
+            className="absolute top-3 left-36 z-40 bg-black/60 hover:bg-black/90 text-neutral-400 hover:text-white px-2.5 py-1 text-[11px] rounded border border-neutral-700 pointer-events-auto transition-colors font-mono cursor-pointer"
           >
             MENU (ESC)
           </button>
@@ -494,19 +645,8 @@ export default function App() {
         onUpdateSettings={(newS) => setSettings((prev) => ({ ...prev, ...newS }))}
         onUpdateVolume={(v) => setVolume(v)}
         onToggleMute={() => setIsMuted((prev) => !prev)}
+        onQuitMatch={screen === 'playing' ? handleQuitToLobby : undefined}
       />
-
-      {/* Leave match button inside settings if in game */}
-      {isSettingsOpen && screen === 'playing' && (
-        <div className="fixed bottom-10 left-1/2 -translate-x-1/2 z-50">
-          <button
-            onClick={handleQuitToLobby}
-            className="bg-red-900/90 hover:bg-red-800 text-white font-mono font-bold px-6 py-2.5 rounded-lg border border-red-500 shadow-2xl transition-all cursor-pointer"
-          >
-            RỜI TRẬN ĐẤU VỀ MENU CHÍNH
-          </button>
-        </div>
-      )}
     </div>
   );
 }

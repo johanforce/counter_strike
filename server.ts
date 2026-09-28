@@ -38,9 +38,7 @@ interface Room {
   code: string;
   hostId: string;
   mode: '1v1' | '2v2';
-  mapId: 'dust2' | 'mirage' | 'inferno';
-  targetWins: number;
-  state: 'waiting' | 'playing' | 'round_end' | 'match_end';
+  state: 'waiting' | 'playing' | 'round_end';
   redScore: number;
   blueScore: number;
   round: number;
@@ -166,42 +164,19 @@ app.get('/api/rooms/:code', (req, res) => {
   });
 });
 
-const MAP_SPAWN_POINTS: Record<string, { red: { x: number; y: number; z: number; rotY: number }[]; blue: { x: number; y: number; z: number; rotY: number }[] }> = {
-  dust2: {
-    red: [
-      { x: -28, y: 1.6, z: -28, rotY: -3 * Math.PI / 4 },
-      { x: -32, y: 1.6, z: -24, rotY: -3 * Math.PI / 4 }
-    ],
-    blue: [
-      { x: 28, y: 1.6, z: 28, rotY: Math.PI / 4 },
-      { x: 24, y: 1.6, z: 32, rotY: Math.PI / 4 }
-    ]
-  },
-  mirage: {
-    red: [
-      { x: -24, y: 1.6, z: -26, rotY: -Math.PI / 4 },
-      { x: -20, y: 1.6, z: -28, rotY: -Math.PI / 4 }
-    ],
-    blue: [
-      { x: 24, y: 1.6, z: 26, rotY: 3 * Math.PI / 4 },
-      { x: 20, y: 1.6, z: 28, rotY: 3 * Math.PI / 4 }
-    ]
-  },
-  inferno: {
-    red: [
-      { x: -16, y: 1.6, z: -26, rotY: -Math.PI / 4 },
-      { x: -20, y: 1.6, z: -22, rotY: -Math.PI / 4 }
-    ],
-    blue: [
-      { x: 18, y: 1.6, z: 26, rotY: 3 * Math.PI / 4 },
-      { x: 14, y: 1.6, z: 28, rotY: 3 * Math.PI / 4 }
-    ]
-  }
+const SPAWN_POINTS = {
+  red: [
+    { x: -28, y: 1.6, z: -28, rotY: -3 * Math.PI / 4 },
+    { x: -32, y: 1.6, z: -24, rotY: -3 * Math.PI / 4 }
+  ],
+  blue: [
+    { x: 28, y: 1.6, z: 28, rotY: Math.PI / 4 },
+    { x: 24, y: 1.6, z: 32, rotY: Math.PI / 4 }
+  ]
 };
 
-function getSpawn(team: 'red' | 'blue', slot: number, mapId: string = 'dust2') {
-  const mapSpawns = MAP_SPAWN_POINTS[mapId] || MAP_SPAWN_POINTS.dust2;
-  const list = mapSpawns[team];
+function getSpawn(team: 'red' | 'blue', slot: number) {
+  const list = SPAWN_POINTS[team];
   const idx = slot % list.length;
   return list[idx];
 }
@@ -222,8 +197,6 @@ function getRoomSnapshot(room: Room) {
     code: room.code,
     hostId: room.hostId,
     mode: room.mode,
-    mapId: room.mapId || 'dust2',
-    targetWins: room.targetWins || 7,
     state: room.state,
     redScore: room.redScore,
     blueScore: room.blueScore,
@@ -242,7 +215,7 @@ function startNewRound(room: Room) {
   room.players.forEach((p, id) => {
     p.health = 100;
     p.isAlive = true;
-    const spawn = getSpawn(p.team, p.slot, room.mapId);
+    const spawn = getSpawn(p.team, p.slot);
     p.x = spawn.x;
     p.y = spawn.y;
     p.z = spawn.z;
@@ -274,26 +247,10 @@ function checkRoundStatus(room: Room) {
     }
   });
 
-  const targetWins = room.targetWins || 7;
-
   // Only evaluate win condition if there are players on both teams
   if (redTotal > 0 && blueTotal > 0) {
     if (redAlive === 0) {
       room.blueScore++;
-      // Check First-to-7 match win condition
-      if (room.blueScore >= targetWins) {
-        room.state = 'match_end';
-        broadcastToRoom(room, {
-          type: 'match_ended',
-          winner: 'blue',
-          redScore: room.redScore,
-          blueScore: room.blueScore,
-          reason: `🏆 ĐỘI XANH ĐÃ CHẠM ${targetWins} HIỆP THẮNG TRƯỚC VÀ GIÀNH CHIẾN THẮNG CHUNG CUỘC!`,
-          room: getRoomSnapshot(room)
-        });
-        return;
-      }
-
       room.state = 'round_end';
       broadcastToRoom(room, {
         type: 'round_ended',
@@ -302,27 +259,13 @@ function checkRoundStatus(room: Room) {
         room: getRoomSnapshot(room)
       });
       setTimeout(() => {
-        if (rooms.has(room.code) && room.state !== 'match_end') {
+        if (rooms.has(room.code)) {
           startNewRound(room);
         }
       }, 4000);
       return;
     } else if (blueAlive === 0) {
       room.redScore++;
-      // Check First-to-7 match win condition
-      if (room.redScore >= targetWins) {
-        room.state = 'match_end';
-        broadcastToRoom(room, {
-          type: 'match_ended',
-          winner: 'red',
-          redScore: room.redScore,
-          blueScore: room.blueScore,
-          reason: `🏆 ĐỘI ĐỎ ĐÃ CHẠM ${targetWins} HIỆP THẮNG TRƯỚC VÀ GIÀNH CHIẾN THẮNG CHUNG CUỘC!`,
-          room: getRoomSnapshot(room)
-        });
-        return;
-      }
-
       room.state = 'round_end';
       broadcastToRoom(room, {
         type: 'round_ended',
@@ -331,7 +274,7 @@ function checkRoundStatus(room: Room) {
         room: getRoomSnapshot(room)
       });
       setTimeout(() => {
-        if (rooms.has(room.code) && room.state !== 'match_end') {
+        if (rooms.has(room.code)) {
           startNewRound(room);
         }
       }, 4000);
@@ -340,6 +283,7 @@ function checkRoundStatus(room: Room) {
   }
 
   if (room.roundTimeLeft <= 0) {
+    room.state = 'round_end';
     let winner = 'draw';
     if (redAlive > blueAlive) {
       room.redScore++;
@@ -348,23 +292,6 @@ function checkRoundStatus(room: Room) {
       room.blueScore++;
       winner = 'blue';
     }
-
-    if (room.redScore >= targetWins || room.blueScore >= targetWins) {
-      room.state = 'match_end';
-      const matchWinner = room.redScore >= targetWins ? 'red' : 'blue';
-      const winnerName = matchWinner === 'red' ? 'Đội Đỏ' : 'Đội Xanh';
-      broadcastToRoom(room, {
-        type: 'match_ended',
-        winner: matchWinner,
-        redScore: room.redScore,
-        blueScore: room.blueScore,
-        reason: `🏆 ${winnerName.toUpperCase()} ĐÃ CHẠM ${targetWins} HIỆP THẮNG VÀ ĐOẠT CÚP VÔ ĐỊCH!`,
-        room: getRoomSnapshot(room)
-      });
-      return;
-    }
-
-    room.state = 'round_end';
     broadcastToRoom(room, {
       type: 'round_ended',
       winner,
@@ -372,7 +299,7 @@ function checkRoundStatus(room: Room) {
       room: getRoomSnapshot(room)
     });
     setTimeout(() => {
-      if (rooms.has(room.code) && room.state !== 'match_end') {
+      if (rooms.has(room.code)) {
         startNewRound(room);
       }
     }, 4000);
@@ -440,8 +367,6 @@ wss.on('connection', (ws: WebSocket) => {
             code: normalizedCode,
             hostId: playerId,
             mode: mode || '1v1',
-            mapId: data.mapId || 'dust2',
-            targetWins: 7,
             state: 'waiting',
             redScore: 0,
             blueScore: 0,
@@ -457,8 +382,6 @@ wss.on('connection', (ws: WebSocket) => {
           // Re-initialize empty room
           room.hostId = playerId;
           room.mode = mode || room.mode || '1v1';
-          if (data.mapId) room.mapId = data.mapId;
-          room.targetWins = 7;
           room.state = 'waiting';
           room.redScore = 0;
           room.blueScore = 0;
@@ -531,7 +454,7 @@ wss.on('connection', (ws: WebSocket) => {
         }
 
         const slot = team === 'red' ? redCount : blueCount;
-        const spawn = getSpawn(team, slot, room.mapId);
+        const spawn = getSpawn(team, slot);
 
         const player: PlayerState = {
           id: playerId,
@@ -587,7 +510,7 @@ wss.on('connection', (ws: WebSocket) => {
         if (count < maxPerTeam) {
           p.team = targetTeam;
           p.slot = count;
-          const spawn = getSpawn(p.team, p.slot, room.mapId);
+          const spawn = getSpawn(p.team, p.slot);
           p.x = spawn.x;
           p.y = spawn.y;
           p.z = spawn.z;
@@ -596,30 +519,6 @@ wss.on('connection', (ws: WebSocket) => {
           broadcastToRoom(room, {
             type: 'player_updated',
             player: p,
-            room: getRoomSnapshot(room)
-          });
-        }
-      }
-
-      else if (type === 'change_map') {
-        const room = rooms.get(currentRoomCode);
-        if (!room) return;
-        if (room.hostId !== currentPlayerId) {
-          ws.send(JSON.stringify({ type: 'error', message: 'Chỉ chủ phòng mới có thể đổi bản đồ!' }));
-          return;
-        }
-        if (room.state === 'waiting' && (data.mapId === 'dust2' || data.mapId === 'mirage' || data.mapId === 'inferno')) {
-          room.mapId = data.mapId;
-          // Re-align players' spawns according to new map
-          room.players.forEach(p => {
-            const sp = getSpawn(p.team, p.slot, room.mapId);
-            p.x = sp.x;
-            p.y = sp.y;
-            p.z = sp.z;
-            p.rotY = sp.rotY;
-          });
-          broadcastToRoom(room, {
-            type: 'room_updated',
             room: getRoomSnapshot(room)
           });
         }

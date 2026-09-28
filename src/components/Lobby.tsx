@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { GameMode, Team, BotDifficulty, WEAPONS, WeaponType, ActiveRoomInfo, MapId, MAPS_METADATA } from '../types/game';
+import { GameMode, Team, BotDifficulty, WEAPONS, WeaponType, ActiveRoomInfo } from '../types/game';
 import { sounds } from '../game/audio';
-import { MapBlueprintModal } from './MapBlueprintModal';
 import {
   Crosshair,
   Users,
@@ -19,10 +18,7 @@ import {
   ArrowRight,
   Radio,
   Share2,
-  DollarSign,
-  Info,
-  Flame,
-  CloudFog
+  DollarSign
 } from 'lucide-react';
 
 interface LobbyProps {
@@ -30,7 +26,6 @@ interface LobbyProps {
     playerName: string;
     team: Team;
     mode: GameMode;
-    mapId?: MapId;
     isOnline: boolean;
     roomCode?: string;
     botDifficulty: BotDifficulty;
@@ -39,15 +34,12 @@ interface LobbyProps {
   onOpenSettings: () => void;
 }
 
-const SHOWCASE_WEAPONS: WeaponType[] = ['usp', 'pistol', 'mp9', 'xm1014', 'm4a1s', 'ak47', 'awp', 'knife', 'hegrenade', 'smokegrenade'];
+const SHOWCASE_WEAPONS: WeaponType[] = ['usp', 'pistol', 'mp9', 'xm1014', 'm4a1s', 'ak47', 'awp', 'knife'];
 
 export const Lobby: React.FC<LobbyProps> = ({ onStartGame, onOpenSettings }) => {
   const [playerName, setPlayerName] = useState(() => 'ChienBinh_' + Math.floor(Math.random() * 900 + 100));
   const [mode, setMode] = useState<GameMode>('2v2');
   const [team, setTeam] = useState<Team>('red');
-  const [selectedMap, setSelectedMap] = useState<MapId>('dust2');
-  const [isMapModalOpen, setIsMapModalOpen] = useState(false);
-  const [modalMapId, setModalMapId] = useState<MapId>('dust2');
   const [isOnline, setIsOnline] = useState(false);
 
   const [onlineTab, setOnlineTab] = useState<'join' | 'create'>('join');
@@ -189,7 +181,6 @@ export const Lobby: React.FC<LobbyProps> = ({ onStartGame, onOpenSettings }) => 
         playerName: playerName.trim() || 'TaySung_X',
         team,
         mode,
-        mapId: selectedMap,
         isOnline: false,
         botDifficulty
       });
@@ -206,7 +197,6 @@ export const Lobby: React.FC<LobbyProps> = ({ onStartGame, onOpenSettings }) => 
         playerName: playerName.trim() || 'TaySung_X',
         team,
         mode,
-        mapId: selectedMap,
         isOnline: true,
         roomCode: code,
         botDifficulty,
@@ -218,7 +208,6 @@ export const Lobby: React.FC<LobbyProps> = ({ onStartGame, onOpenSettings }) => 
         playerName: playerName.trim() || 'TaySung_X',
         team,
         mode,
-        mapId: selectedMap,
         isOnline: true,
         roomCode: code,
         botDifficulty,
@@ -603,59 +592,6 @@ export const Lobby: React.FC<LobbyProps> = ({ onStartGame, onOpenSettings }) => 
               </div>
             )}
 
-            {/* Choose Map (3 maps: Dust II, Mirage, Inferno) */}
-            <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <label className="block text-[10px] font-bold text-neutral-400 uppercase tracking-wider">
-                  Chọn Bản Đồ Chiến Đấu (3 Map Đồng Bộ Radar)
-                </label>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setModalMapId(selectedMap);
-                    setIsMapModalOpen(true);
-                  }}
-                  className="text-[10px] text-amber-400 hover:text-amber-300 font-bold flex items-center gap-1 cursor-pointer"
-                >
-                  <Info className="w-3 h-3" />
-                  <span>Xem Chi Tiết Bản Đồ</span>
-                </button>
-              </div>
-
-              <div className="grid grid-cols-3 gap-2">
-                {(['dust2', 'mirage', 'inferno'] as MapId[]).map((mId) => {
-                  const m = MAPS_METADATA[mId];
-                  const isSel = selectedMap === mId;
-                  return (
-                    <button
-                      key={mId}
-                      type="button"
-                      onClick={() => {
-                        setSelectedMap(mId);
-                        sounds.playCoinSound();
-                      }}
-                      className={`p-2 rounded-xl border text-left flex flex-col justify-between transition-all cursor-pointer ${
-                        isSel
-                          ? 'bg-neutral-900 border-amber-500 shadow-[0_0_15px_rgba(245,158,11,0.25)] ring-1 ring-amber-400'
-                          : 'bg-neutral-950 border-neutral-800 text-neutral-400 hover:bg-neutral-900'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between mb-1">
-                        <span className={`text-[10px] font-black uppercase ${isSel ? 'text-amber-400' : 'text-neutral-300'}`}>
-                          {m.code.toUpperCase()}
-                        </span>
-                        <span className="text-[8.5px] px-1.5 py-0.2 rounded font-bold" style={{ backgroundColor: `${m.accentColor}25`, color: m.accentColor }}>
-                          {m.theme === 'desert' ? '🏜️ Sa Mạc' : m.theme === 'middle_eastern' ? '🕌 Cung Điện' : '⛪ Phố Cổ'}
-                        </span>
-                      </div>
-                      <div className="font-bold text-xs text-white truncate">{m.name}</div>
-                      <div className="text-[9.5px] text-neutral-500 truncate mt-0.5">{m.vietnameseName}</div>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
             {/* Choose Team */}
             <div>
               <label className="block text-[10px] font-bold text-neutral-400 uppercase tracking-wider mb-1.5">
@@ -701,7 +637,7 @@ export const Lobby: React.FC<LobbyProps> = ({ onStartGame, onOpenSettings }) => 
               <div className="flex items-center gap-2">
                 <DollarSign className="w-4 h-4 text-emerald-400 shrink-0" />
                 <span className="text-neutral-300">
-                  Thể thức: Đội nào chạm <strong className="text-amber-400">7 HIỆP THẮNG</strong> trước là WIN • Phím <strong className="text-amber-400">B</strong> mua súng, lựu đạn HE & Smoke.
+                  Luật CS:GO: Khởi đầu <strong className="text-emerald-400">$800 + USP-S</strong> • Bấm <strong className="text-amber-400">Phím B</strong> mua súng MP9, XM1014, M4A1-S, AK-47, AWP.
                 </span>
               </div>
             </div>
@@ -807,64 +743,33 @@ export const Lobby: React.FC<LobbyProps> = ({ onStartGame, onOpenSettings }) => 
             </div>
           </div>
 
-          {/* Interactive Map & Controls Card */}
-          <div className="bg-neutral-900/90 border border-neutral-800 rounded-xl p-3.5 shadow-2xl shrink-0 space-y-2">
-            <div className="flex items-center justify-between border-b border-neutral-800 pb-1.5">
+          {/* Compact Map & Controls Card */}
+          <div className="bg-neutral-900/90 border border-neutral-800 rounded-xl p-3.5 shadow-2xl shrink-0">
+            <div className="flex items-center justify-between border-b border-neutral-800 pb-1.5 mb-2">
               <span className="text-xs font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
                 <MapPin className="w-3.5 h-3.5 text-amber-400" />
-                Bản đồ: {MAPS_METADATA[selectedMap].code.toUpperCase()} ({MAPS_METADATA[selectedMap].name})
+                Bản đồ: de_dust_classic
               </span>
               <span className="text-[10px] text-emerald-400 font-bold bg-emerald-950 px-2 py-0.5 rounded border border-emerald-800">
-                FIRST TO 7 WINS
+                1VS1 & 2VS2
               </span>
             </div>
 
-            <div className="flex items-center justify-between bg-black/60 p-2 rounded-lg border border-neutral-800">
-              <div className="min-w-0 pr-2">
-                <div className="text-xs font-bold text-white truncate">
-                  {MAPS_METADATA[selectedMap].vietnameseName}
-                </div>
-                <div className="text-[10.5px] text-neutral-400 truncate">
-                  {MAPS_METADATA[selectedMap].tagline}
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setModalMapId(selectedMap);
-                  setIsMapModalOpen(true);
-                }}
-                className="px-2.5 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/50 rounded-lg text-[10.5px] font-bold flex items-center gap-1 shrink-0 cursor-pointer transition-colors"
-              >
-                <Info className="w-3.5 h-3.5 text-amber-400" />
-                <span>Xem Sơ Đồ & Smoke</span>
-              </button>
-            </div>
-
-            <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[10px] text-neutral-400 border-t border-neutral-800/80 pt-1.5">
+            <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[10.5px] text-neutral-400">
               <div><strong className="text-neutral-200">W A S D:</strong> Di chuyển</div>
-              <div><strong className="text-neutral-200">Phím B:</strong> Mua súng & Nade</div>
-              <div><strong className="text-neutral-200">Phím 4 / G:</strong> Đổi / Ném lựu đạn</div>
-              <div><strong className="text-neutral-200">Chuột Phải:</strong> Ngắm AWP / Đâm dao</div>
-              <div><strong className="text-neutral-200">1 / 2 / 3 / 4:</strong> Súng chính/lục/dao/nade</div>
-              <div><strong className="text-neutral-200">C / Space / R:</strong> Ngồi / Nhảy / Nạp</div>
+              <div><strong className="text-neutral-200">Phím B:</strong> Chợ mua súng CS:GO</div>
+              <div><strong className="text-neutral-200">Chuột trái:</strong> Bắn / Chém</div>
+              <div><strong className="text-neutral-200">Chuột phải:</strong> Ngắm Scope / Đâm</div>
+              <div><strong className="text-neutral-200">Phím 1/2/3:</strong> Đổi vũ khí</div>
+              <div><strong className="text-neutral-200">R / Space / C:</strong> Nạp / Nhảy / Ngồi</div>
             </div>
           </div>
         </div>
       </main>
 
-      {/* Map Blueprint & Information Modal */}
-      <MapBlueprintModal
-        isOpen={isMapModalOpen}
-        mapId={modalMapId}
-        onClose={() => setIsMapModalOpen(false)}
-        onSelectMap={(m) => setSelectedMap(m)}
-        selectable={true}
-      />
-
       {/* Compact Footer */}
       <footer className="relative z-10 w-full max-w-6xl shrink-0 text-center text-[10px] text-neutral-500 border-t border-neutral-900 pt-1.5">
-        Strike Classic 3D • Sa Mạc Bụi Cát II • Cung Điện Mirage • Phố Cổ Inferno • Lựu Đạn Nổ HE & Bom Khói Smoke • First to 7 Wins
+        Strike Classic 3D • USP-S • Desert Eagle • MP9 • XM1014 • M4A1-S • AK-47 • AWP Sniper • Tactical Knife
       </footer>
     </div>
   );

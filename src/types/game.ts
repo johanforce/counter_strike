@@ -1,88 +1,14 @@
-export type WeaponType = 'usp' | 'pistol' | 'mp9' | 'xm1014' | 'ak47' | 'm4a1s' | 'awp' | 'knife' | 'hegrenade' | 'smokegrenade';
+export type WeaponType = 'usp' | 'pistol' | 'mp9' | 'xm1014' | 'ak47' | 'm4a1s' | 'awp' | 'knife';
 export type Team = 'red' | 'blue';
 export type GameMode = '1v1' | '2v2';
 export type BotDifficulty = 'easy' | 'normal' | 'hard';
-export type MapId = 'dust2' | 'mirage' | 'inferno';
-
-export const MATCH_TARGET_WINS = 7; // Đội chạm 7 trận thắng trước sẽ chiến thắng chung cuộc
-
-export interface MapMetadata {
-  id: MapId;
-  name: string;
-  code: string;
-  vietnameseName: string;
-  tagline: string;
-  description: string;
-  theme: 'desert' | 'middle_eastern' | 'european';
-  tacticalBriefing: string[];
-  keyCallouts: string[];
-  difficulty: 'Cân bằng' | 'Chiến thuật cao' | 'Đột kích hẹp';
-  accentColor: string;
-}
-
-export const MAPS_METADATA: Record<MapId, MapMetadata> = {
-  dust2: {
-    id: 'dust2',
-    name: 'Dust II',
-    code: 'de_dust2',
-    vietnameseName: 'Sa Mạc Bụi Cát II',
-    tagline: 'Đấu trường kinh điển số 1 của Counter-Strike',
-    description: 'Bản đồ sa mạc huyền thoại với kết cấu 3 làn hoàn hảo: hành lang Long A rộng mở, cổng vòm Mid ác liệt và đường hầm B hiểm trở.',
-    theme: 'desert',
-    tacticalBriefing: [
-      'Long A: Khu vực giao tranh tầm xa lý tưởng cho súng ngắm AWP và AK-47.',
-      'Mid Doors: Góc bắn hiểm nghẹt thở, tận dụng Smoke ném ra cửa để che tầm nhìn CT.',
-      'Catwalk (Short A): Lối đột kích trên cao dẫn thẳng lên Bombsite A.',
-      'B Tunnels: Đường hầm tối tăm dẫn tới khu đặt bom B, cẩn thận lựu đạn HE nảy góc tường.'
-    ],
-    keyCallouts: ['Khu đặt bom A (Catwalk)', 'Hành lang Long A', 'Cổng Mid (Double Doors)', 'Đường hầm B', 'Khu đặt bom B (Site B)', 'Căn cứ T & CT'],
-    difficulty: 'Cân bằng',
-    accentColor: '#f59e0b'
-  },
-  mirage: {
-    id: 'mirage',
-    name: 'Mirage',
-    code: 'de_mirage',
-    vietnameseName: 'Thị Trấn Cổ Mirage',
-    tagline: 'Kinh đô chiến thuật đa tầng và góc kê hiểm hóc',
-    description: 'Thị trấn Trung Đông cổ kính với Cung điện lộng lẫy, Cửa sổ Mid ngắm tỉa và các tòa nhà căn hộ B đa tầng phức tạp.',
-    theme: 'middle_eastern',
-    tacticalBriefing: [
-      'Cung Điện (Palace): Cửa ngõ đột kích cao tầng dẫn thẳng vào Site A, cần kiểm tra ban công.',
-      'Cửa Sổ Mid (Window): Cứ điểm ngắm AWP phòng thủ chiến lược số 1 của CT.',
-      'Đầu Nối (Connector): Lối đi huyết mạch nối liền Trung Tâm và Bombsite A.',
-      'Căn Hộ B (Apartments): Hành lang nhà ở chật chội, cực kỳ nguy hiểm trước lựu đạn khói và nổ.'
-    ],
-    keyCallouts: ['Cung Điện (Palace)', 'Cửa Sổ Mid (Window)', 'Đầu Nối (Connector)', 'Căn Hộ B (Apartments)', 'Khu đặt bom A & B', 'Căn cứ T & CT'],
-    difficulty: 'Chiến thuật cao',
-    accentColor: '#38bdf8'
-  },
-  inferno: {
-    id: 'inferno',
-    name: 'Inferno',
-    code: 'de_inferno',
-    vietnameseName: 'Phố Cổ Inferno',
-    tagline: 'Chiến trường góc hẹp nghẹt thở và lửa khói rực trời',
-    description: 'Phố cổ châu Âu với những con ngõ lát đá quanh co. Cung đường Chuối (Banana) tử thần và Hố Tử Thần (Pit) là nơi diễn ra các cuộc đọ súng đẫm máu.',
-    theme: 'european',
-    tacticalBriefing: [
-      'Đoạn cua Chuối (Banana): Hẻm hẹp dẫn tới Site B, địa điểm ném lựu đạn nổ HE và khói khốc liệt nhất.',
-      'Hố Tử Thần (Pit): Góc ẩn nấp phòng thủ vững chãi nhất khu vực A của CT.',
-      'Nhà Thờ B (Church/Ruins): Tường đá kiên cố bảo vệ bombsite B từ phía sau.',
-      'Căn hộ & Nồi Hơi (Boiler/Appts): Góc phục kích bất ngờ hướng ra Mid và Ban Công A.'
-    ],
-    keyCallouts: ['Cung đường Chuối (Banana)', 'Hố Tử Thần (Pit)', 'Nhà Thờ (Church B)', 'Ban Công A (Balcony)', 'Căn hộ (Boiler)', 'Khu đặt bom A & B'],
-    difficulty: 'Đột kích hẹp',
-    accentColor: '#ef4444'
-  }
-};
 
 export interface WeaponData {
   id: WeaponType;
   name: string;
   vietnameseName: string;
-  slot: 1 | 2 | 3 | 4; // 1: Primary, 2: Secondary (Pistol), 3: Melee (Knife), 4: Grenades
-  category: 'rifles' | 'smgs' | 'pistols' | 'melee' | 'grenades' | 'gear';
+  slot: 1 | 2 | 3; // 1: Primary, 2: Secondary (Pistol), 3: Melee (Knife)
+  category: 'rifles' | 'smgs' | 'pistols' | 'melee';
   damage: number;
   headshotMultiplier: number;
   magSize: number;
@@ -265,46 +191,6 @@ export const WEAPONS: Record<WeaponType, WeaponData> = {
     price: 0,
     killReward: 1500,
     description: 'Dao găm cận chiến tốc độ cao (+8% chạy nhanh), thưởng nóng +$1,500 khi hạ gục!'
-  },
-  hegrenade: {
-    id: 'hegrenade',
-    name: 'HE Grenade High-Explosive',
-    vietnameseName: 'Lựu Đạn Nổ HE',
-    slot: 4,
-    category: 'grenades',
-    damage: 90,
-    headshotMultiplier: 1.0,
-    magSize: 1,
-    maxReserveAmmo: 1,
-    fireRate: 900,
-    reloadTime: 0,
-    spread: 0,
-    recoilKick: 0,
-    isAutomatic: false,
-    range: 35,
-    price: 300,
-    killReward: 300,
-    description: 'Lựu đạn nổ gây sát thương diện rộng uy lực lớn. Nảy vật lý theo bề mặt tường và sàn trước khi phát nổ!'
-  },
-  smokegrenade: {
-    id: 'smokegrenade',
-    name: 'Tactical Smoke Grenade',
-    vietnameseName: 'Lựu Đạn Khói',
-    slot: 4,
-    category: 'grenades',
-    damage: 0,
-    headshotMultiplier: 1.0,
-    magSize: 1,
-    maxReserveAmmo: 1,
-    fireRate: 900,
-    reloadTime: 0,
-    spread: 0,
-    recoilKick: 0,
-    isAutomatic: false,
-    range: 35,
-    price: 300,
-    killReward: 0,
-    description: 'Lựu đạn tạo màn khói xám chiến thuật kéo dài 18 giây, chặn đứng hoàn toàn tầm nhìn đối thủ và Bot!'
   }
 };
 
@@ -344,13 +230,11 @@ export interface RoomState {
   code: string;
   hostId?: string;
   mode: GameMode;
-  mapId?: MapId;
-  state: 'waiting' | 'playing' | 'round_end' | 'match_end';
+  state: 'waiting' | 'playing' | 'round_end';
   redScore: number;
   blueScore: number;
   round: number;
   maxRounds: number;
-  targetWins?: number;
   roundTimeLeft: number;
   players: PlayerNetState[];
 }
@@ -358,15 +242,13 @@ export interface RoomState {
 export interface ActiveRoomInfo {
   code: string;
   mode: GameMode;
-  mapId?: MapId;
-  state: 'waiting' | 'playing' | 'round_end' | 'match_end';
+  state: 'waiting' | 'playing' | 'round_end';
   playerCount: number;
   maxPlayers: number;
   redCount: number;
   blueCount: number;
   hostName: string;
   isFull: boolean;
-  targetWins?: number;
 }
 
 export interface HitEffect {
@@ -407,7 +289,7 @@ export interface GameSettings {
 export interface BuyItem {
   id: string;
   name: string;
-  category: 'rifles' | 'smgs' | 'pistols' | 'grenades' | 'gear';
+  category: 'rifles' | 'smgs' | 'pistols' | 'gear';
   price: number;
   shortcut: string;
   hotkey: string;
@@ -495,34 +377,12 @@ export const CS_BUY_ITEMS: BuyItem[] = [
     weaponId: 'awp'
   },
   {
-    id: 'hegrenade',
-    name: 'Lựu Đạn Nổ HE Grenade',
-    category: 'grenades',
-    price: 300,
-    shortcut: '8',
-    hotkey: '8',
-    description: 'Lựu đạn nổ sát thương diện rộng. Nảy vật lý theo bề mặt tường và sàn trước khi nổ!',
-    weaponType: 'hegrenade',
-    weaponId: 'hegrenade'
-  },
-  {
-    id: 'smokegrenade',
-    name: 'Lựu Đạn Khói Smoke Grenade',
-    category: 'grenades',
-    price: 300,
-    shortcut: '9',
-    hotkey: '9',
-    description: 'Tạo màn khói xám dày đặc kéo dài 18 giây, chặn hoàn toàn tầm nhìn đối thủ và Bot!',
-    weaponType: 'smokegrenade',
-    weaponId: 'smokegrenade'
-  },
-  {
     id: 'kevlar',
     name: 'Giáp Chống Đạn Kevlar',
     category: 'gear',
     price: 650,
-    shortcut: '0',
-    hotkey: '0',
+    shortcut: '8',
+    hotkey: '8',
     description: 'Phục hồi 100 Giáp, giảm 50% sát thương đạn và dao vào phần thân'
   },
   {
@@ -530,8 +390,8 @@ export const CS_BUY_ITEMS: BuyItem[] = [
     name: 'Giáp Kevlar + Mũ Sắt',
     category: 'gear',
     price: 1000,
-    shortcut: '-',
-    hotkey: '-',
+    shortcut: '9',
+    hotkey: '9',
     description: 'Bảo vệ toàn diện 100 Giáp + Mũ chống đạn giảm sát thương chí mạng vào đầu'
   },
   {
@@ -539,8 +399,8 @@ export const CS_BUY_ITEMS: BuyItem[] = [
     name: 'Băng Đạn Tiếp Tế Đầy Đủ',
     category: 'gear',
     price: 200,
-    shortcut: '=',
-    hotkey: '=',
+    shortcut: '0',
+    hotkey: '0',
     description: 'Nạp đầy tối đa toàn bộ đạn dự trữ cho cả Súng chính (Ô 1) và Súng lục (Ô 2)'
   }
 ];

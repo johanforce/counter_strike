@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { WeaponType, KillFeedEvent, WEAPONS, ChatMessage, Team, MapId } from '../types/game';
-import { getMapBlueprint, getLocationNameForMap, RadarObstacle } from '../game/map';
-import { Shield, Crosshair as CrosshairIcon, RotateCcw, Zap, Compass, ZoomIn, ZoomOut, Navigation, MessageSquare, Send, ShoppingCart, Skull, Flame, CloudFog, Radio } from 'lucide-react';
+import { WeaponType, KillFeedEvent, WEAPONS, ChatMessage, Team } from '../types/game';
+import { Shield, Crosshair as CrosshairIcon, RotateCcw, Zap, Compass, ZoomIn, ZoomOut, Navigation, MessageSquare, Send, ShoppingCart, Skull } from 'lucide-react';
 import { BuyMenu } from './BuyMenu';
 
 interface HUDProps {
@@ -29,10 +28,6 @@ interface HUDProps {
     playerPos: { x: number; y?: number; z: number; rotY: number };
     allies: { x: number; y?: number; z: number; name?: string; rotY?: number }[];
     enemies: { x: number; y?: number; z: number; rotY?: number }[];
-    mapId?: MapId;
-    obstacles?: RadarObstacle[];
-    bombsites?: { id: 'A' | 'B'; name: string; x: number; z: number }[];
-    activeSmokes?: { x: number; z: number; radius: number }[];
   } | null;
   roundStatus: {
     show: boolean;
@@ -52,12 +47,58 @@ interface HUDProps {
   onToggleBuyMenu?: () => void;
   onBuyItem?: (itemId: string) => void;
   headshotEffect?: boolean;
-  mapId?: MapId;
-  heGrenades?: number;
-  smokeGrenades?: number;
-  inSmoke?: boolean;
-  targetWins?: number;
-  radioSubtitle?: { text: string; sender: string } | null;
+}
+
+// Map landmarks and colliders definition for radar visualization
+interface RadarObstacle {
+  x: number;
+  z: number;
+  w: number;
+  d: number;
+  type?: 'wall' | 'site' | 'spawn' | 'tunnel' | 'catwalk';
+  label?: string;
+}
+
+const MAP_OBSTACLES: RadarObstacle[] = [
+  // Outer perimeter walls
+  { x: 0, z: -36, w: 72, d: 2, type: 'wall' },
+  { x: 0, z: 36, w: 72, d: 2, type: 'wall' },
+  { x: -36, z: 0, w: 2, d: 72, type: 'wall' },
+  { x: 36, z: 0, w: 2, d: 72, type: 'wall' },
+
+  // Center Mid structures
+  { x: -18, z: -22, w: 1.5, d: 24, type: 'wall' },
+  { x: -18, z: 22, w: 1.5, d: 24, type: 'wall' },
+  { x: 18, z: -22, w: 1.5, d: 24, type: 'wall' },
+  { x: 18, z: 22, w: 1.5, d: 24, type: 'wall' },
+  { x: 0, z: -20, w: 20, d: 1.5, type: 'wall' },
+  { x: 0, z: 20, w: 20, d: 1.5, type: 'wall' },
+  { x: 0, z: 0, w: 6, d: 6, type: 'wall' }, // Center Mid Pillar
+
+  // Underpass tunnel
+  { x: 0, z: -11, w: 10, d: 14, type: 'tunnel', label: 'TUNNEL' },
+
+  // Catwalk (Site A high ground)
+  { x: 18, z: 0, w: 12, d: 16, type: 'catwalk', label: 'CATWALK' },
+
+  // Long A corridor
+  { x: -24, z: 0, w: 8, d: 36, type: 'tunnel', label: 'LONG' },
+
+  // Crates & shipping containers
+  { x: -8, z: -10, w: 4, d: 4, type: 'wall' },
+  { x: 8, z: 10, w: 4, d: 4, type: 'wall' },
+  { x: -24, z: 14, w: 5, d: 8, type: 'wall' }
+];
+
+function getLocationName(x: number, z: number): string {
+  if (x >= 10 && x <= 26 && z >= -10 && z <= 10) return '📍 [A] KHU VỰC CATWALK (SITE A)';
+  if (x <= -16 && z >= 8) return '📍 [B] KHU VỰC QUẢNG TRƯỜNG (SITE B)';
+  if (x <= -16 && z >= -18 && z < 8) return '📍 [B] HÀNH LANG DÀI (LONG B)';
+  if (x >= -8 && x <= 8 && z >= -20 && z <= -4) return '📍 ĐƯỜNG HẦM (UNDERPASS)';
+  if (Math.abs(x) < 14 && Math.abs(z) < 14) return '📍 KHU TRUNG TÂM (MID COURTYARD)';
+  if (x <= -18 && z <= -18) return '📍 CĂN CỨ PHE ĐỎ (T BASE)';
+  if (x >= 18 && z >= 18) return '📍 CĂN CỨ PHE XANH (CT BASE)';
+  return '📍 HÀNH LANG CHIẾN ĐẤU';
 }
 
 export const HUD: React.FC<HUDProps> = ({
@@ -95,13 +136,7 @@ export const HUD: React.FC<HUDProps> = ({
   isBuyMenuOpen = false,
   onToggleBuyMenu,
   onBuyItem,
-  headshotEffect = false,
-  mapId = 'dust2',
-  heGrenades = 1,
-  smokeGrenades = 1,
-  inSmoke = false,
-  targetWins = 7,
-  radioSubtitle = null
+  headshotEffect = false
 }) => {
   const currentWeaponData = WEAPONS[weapon] || WEAPONS.usp;
   const minutes = Math.floor(timeLeft / 60);
@@ -255,13 +290,7 @@ export const HUD: React.FC<HUDProps> = ({
       };
 
       // 2. Draw Map Blueprint Geometry
-      const activeMap = radarData?.mapId || mapId || 'dust2';
-      const blueprint = getMapBlueprint(activeMap);
-      const obstaclesToRender = (radarData?.obstacles && radarData.obstacles.length > 0)
-        ? radarData.obstacles
-        : blueprint.obstacles;
-
-      obstaclesToRender.forEach(obs => {
+      MAP_OBSTACLES.forEach(obs => {
         const p1 = worldToRadar(obs.x - obs.w / 2, obs.z - obs.d / 2);
         const p2 = worldToRadar(obs.x + obs.w / 2, obs.z - obs.d / 2);
         const p3 = worldToRadar(obs.x + obs.w / 2, obs.z + obs.d / 2);
@@ -286,12 +315,6 @@ export const HUD: React.FC<HUDProps> = ({
           ctx.strokeStyle = 'rgba(6, 182, 212, 0.5)';
           ctx.lineWidth = 1;
           ctx.stroke();
-        } else if (obs.type === 'crate') {
-          ctx.fillStyle = 'rgba(217, 119, 6, 0.35)';
-          ctx.fill();
-          ctx.strokeStyle = 'rgba(251, 191, 36, 0.8)';
-          ctx.lineWidth = 1.2;
-          ctx.stroke();
         } else {
           // Standard solid wall
           ctx.fillStyle = 'rgba(52, 211, 153, 0.25)';
@@ -303,68 +326,55 @@ export const HUD: React.FC<HUDProps> = ({
       });
 
       // 3. Bombsites & Spawns Icons on Blueprint
-      const bombsitesToRender = (radarData?.bombsites && radarData.bombsites.length > 0)
-        ? radarData.bombsites
-        : blueprint.bombsites;
+      // Bombsite [A] at Catwalk (18, 0)
+      const siteA = worldToRadar(18, 0);
+      ctx.beginPath();
+      ctx.arc(siteA.x, siteA.y, 8, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(245, 158, 11, 0.9)';
+      ctx.fill();
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.fillStyle = '#000';
+      ctx.font = 'bold 9px monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('A', siteA.x, siteA.y + 0.5);
 
-      bombsitesToRender.forEach(site => {
-        const pt = worldToRadar(site.x, site.z);
-        ctx.beginPath();
-        ctx.arc(pt.x, pt.y, 8, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(245, 158, 11, 0.9)';
-        ctx.fill();
-        ctx.strokeStyle = '#fff';
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
-        ctx.fillStyle = '#000';
-        ctx.font = 'bold 9px monospace';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(site.id, pt.x, pt.y + 0.5);
-      });
+      // Bombsite [B] at Long A Plaza (-24, 14)
+      const siteB = worldToRadar(-24, 14);
+      ctx.beginPath();
+      ctx.arc(siteB.x, siteB.y, 8, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(245, 158, 11, 0.9)';
+      ctx.fill();
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.fillStyle = '#000';
+      ctx.font = 'bold 9px monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('B', siteB.x, siteB.y + 0.5);
 
-      // Spawns
-      const spawnT = worldToRadar(blueprint.spawns.red.x, blueprint.spawns.red.z);
+      // Terrorist Spawn [T] at (-28, -28)
+      const spawnT = worldToRadar(-28, -28);
       ctx.beginPath();
       ctx.arc(spawnT.x, spawnT.y, 6.5, 0, Math.PI * 2);
       ctx.fillStyle = '#ef4444';
       ctx.fill();
       ctx.fillStyle = '#fff';
       ctx.font = 'bold 7px monospace';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
       ctx.fillText('T', spawnT.x, spawnT.y + 0.5);
 
-      const spawnCT = worldToRadar(blueprint.spawns.blue.x, blueprint.spawns.blue.z);
+      // Counter-Terrorist Spawn [CT] at (28, 28)
+      const spawnCT = worldToRadar(28, 28);
       ctx.beginPath();
       ctx.arc(spawnCT.x, spawnCT.y, 6.5, 0, Math.PI * 2);
       ctx.fillStyle = '#3b82f6';
       ctx.fill();
       ctx.fillStyle = '#fff';
       ctx.font = 'bold 6.5px monospace';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
       ctx.fillText('CT', spawnCT.x, spawnCT.y + 0.5);
-
-      // Active Smoke Grenades Clouds on Blueprint
-      if (radarData?.activeSmokes && radarData.activeSmokes.length > 0) {
-        const scale = (radius / 36) * zoomLevel;
-        radarData.activeSmokes.forEach(smoke => {
-          const pt = worldToRadar(smoke.x, smoke.z);
-          const radOnRadar = Math.max(8, smoke.radius * scale);
-          const smokeGrad = ctx.createRadialGradient(pt.x, pt.y, 1, pt.x, pt.y, radOnRadar);
-          smokeGrad.addColorStop(0, 'rgba(200, 210, 225, 0.7)');
-          smokeGrad.addColorStop(0.65, 'rgba(150, 160, 175, 0.45)');
-          smokeGrad.addColorStop(1, 'rgba(120, 130, 140, 0)');
-          ctx.beginPath();
-          ctx.arc(pt.x, pt.y, radOnRadar, 0, Math.PI * 2);
-          ctx.fillStyle = smokeGrad;
-          ctx.fill();
-          ctx.strokeStyle = 'rgba(226, 232, 240, 0.4)';
-          ctx.lineWidth = 1;
-          ctx.stroke();
-        });
-      }
 
       // 4. Rotating Radar Sweep Beam (Military tactical effect)
       sweepAngleRef.current = (sweepAngleRef.current + 0.025) % (Math.PI * 2);
@@ -555,34 +565,12 @@ export const HUD: React.FC<HUDProps> = ({
 
     animId = requestAnimationFrame(renderRadar);
     return () => cancelAnimationFrame(animId);
-  }, [radarData, rotateRadar, zoomLevel, mapId]);
+  }, [radarData, rotateRadar, zoomLevel]);
 
-  const activeCurrentMap = radarData?.mapId || mapId || 'dust2';
-  const currentLocation = radarData
-    ? getLocationNameForMap(activeCurrentMap, radarData.playerPos.x, radarData.playerPos.z)
-    : '📍 ĐANG TẢI...';
+  const currentLocation = radarData ? getLocationName(radarData.playerPos.x, radarData.playerPos.z) : '📍 ĐANG TẢI...';
 
   return (
     <div className="absolute inset-0 pointer-events-none select-none overflow-hidden font-mono">
-      {/* In-Smoke Volumetric Fog Veil (When standing inside smoke grenade) */}
-      {inSmoke && !isDead && (
-        <div className="fixed inset-0 pointer-events-none z-30 bg-neutral-600/80 backdrop-blur-[8px] flex items-center justify-center animate-pulse">
-          <div className="flex items-center gap-2 bg-black/60 px-4 py-2 rounded-lg border border-neutral-400/30 text-neutral-200">
-            <CloudFog className="w-5 h-5 text-neutral-300 animate-spin" style={{ animationDuration: '10s' }} />
-            <span className="font-bold text-xs uppercase tracking-widest">TẦM NHÌN BỊ CHE PHỦ BỞI KHÓI ĐỘC</span>
-          </div>
-        </div>
-      )}
-
-      {/* CS:GO Radio Comms Subtitle Notification */}
-      {radioSubtitle && (
-        <div className="absolute bottom-28 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 bg-neutral-950/95 border-2 border-amber-500/80 text-amber-300 px-5 py-2 rounded-xl shadow-[0_0_30px_rgba(245,158,11,0.35)] animate-bounce pointer-events-none">
-          <Radio className="w-4 h-4 text-amber-400 shrink-0 animate-pulse" />
-          <span className="text-xs font-bold text-neutral-300">[{radioSubtitle.sender.toUpperCase()}]:</span>
-          <span className="text-xs font-black tracking-wide text-amber-300 italic">"{radioSubtitle.text}"</span>
-        </div>
-      )}
-
       {/* 1. Low Health Red Vignette / Damage Flash */}
       {isLowHealth && !isDead && (
         <div className="absolute inset-0 border-8 border-red-600/35 animate-pulse pointer-events-none" />
@@ -599,14 +587,9 @@ export const HUD: React.FC<HUDProps> = ({
 
         <div className="h-5 w-px bg-neutral-700 mx-1" />
 
-        {/* Round & Timer & Target Wins Target */}
+        {/* Round & Timer */}
         <div className="flex flex-col items-center">
-          <div className="flex items-center gap-1.5">
-            <span className="text-[10px] text-neutral-400 uppercase tracking-widest">HIỆP {round}</span>
-            <span className="text-[9px] px-1 py-0.2 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30 font-bold">
-              FIRST TO {targetWins}
-            </span>
-          </div>
+          <span className="text-[10px] text-neutral-400 uppercase tracking-widest">HIỆP {round}</span>
           <span className={`text-lg font-black leading-tight ${timeLeft <= 15 ? 'text-red-400 animate-bounce' : 'text-amber-400'}`}>
             {timeFormatted}
           </span>
@@ -990,52 +973,17 @@ export const HUD: React.FC<HUDProps> = ({
           <span className="text-[10px] font-bold text-neutral-300 bg-neutral-700/80 px-1.5 py-0.5 rounded">3</span>
           <span className="text-[11px] font-semibold uppercase">{WEAPONS.knife.vietnameseName}</span>
         </div>
-
-        {/* Slot 4: Tactical Grenades (HE & Smoke) */}
-        <div
-          className={`flex items-center gap-2 px-2.5 py-1 rounded transition-all ${
-            weapon === 'hegrenade' || weapon === 'smokegrenade'
-              ? 'bg-amber-500/30 border border-amber-500 text-amber-300 scale-105 shadow-[0_0_12px_rgba(245,158,11,0.35)]'
-              : (heGrenades > 0 || smokeGrenades > 0)
-              ? 'bg-neutral-800/70 border border-neutral-700 text-neutral-200'
-              : 'bg-neutral-900/50 border border-dashed border-neutral-800 text-neutral-600'
-          }`}
-        >
-          <span className="text-[10px] font-bold text-neutral-300 bg-neutral-700/80 px-1.5 py-0.5 rounded">4</span>
-          <div className="flex items-center gap-1.5 text-[11px] font-bold">
-            <span className={`flex items-center gap-0.5 ${weapon === 'hegrenade' ? 'text-amber-300' : 'text-neutral-400'}`}>
-              💥 HE:{heGrenades}
-            </span>
-            <span className="text-neutral-600">|</span>
-            <span className={`flex items-center gap-0.5 ${weapon === 'smokegrenade' ? 'text-cyan-300' : 'text-neutral-400'}`}>
-              💨 Smoke:{smokeGrenades}
-            </span>
-          </div>
-          <span className="text-[9px] text-amber-400/80 hidden sm:inline ml-0.5">[G: NÉM NHANH]</span>
-        </div>
       </div>
 
-      {/* 8. Bottom-Right: Ammo / Melee / Grenade Tactical Counter */}
+      {/* 8. Bottom-Right: Ammo / Melee Tactical Counter */}
       <div className="absolute bottom-4 right-4 flex items-center gap-3 bg-black/85 backdrop-blur-md px-4 py-2.5 rounded-lg border border-neutral-700 shadow-2xl z-20">
         <div className="flex flex-col items-end">
           <span className="text-[10px] text-neutral-400 tracking-wider uppercase flex items-center gap-1">
             {isKnife && <Zap className="w-3 h-3 text-amber-400" />}
-            {weapon === 'hegrenade' && <Flame className="w-3 h-3 text-red-400" />}
-            {weapon === 'smokegrenade' && <CloudFog className="w-3 h-3 text-cyan-400" />}
             {currentWeaponData.vietnameseName}
           </span>
           <div className="flex items-baseline gap-1.5">
-            {weapon === 'hegrenade' ? (
-              <div className="flex flex-col items-end">
-                <span className="text-xl font-black text-amber-400">💥 {heGrenades} QUẢ LỰU ĐẠN NỔ</span>
-                <span className="text-[10px] text-neutral-400">Chuột Trái: Rút chốt ném • Phím 4: Đổi nade</span>
-              </div>
-            ) : weapon === 'smokegrenade' ? (
-              <div className="flex flex-col items-end">
-                <span className="text-xl font-black text-cyan-400">💨 {smokeGrenades} QUẢ BOM KHÓI</span>
-                <span className="text-[10px] text-neutral-400">Chuột Trái: Ném khói che tầm nhìn • Phím 4: Đổi nade</span>
-              </div>
-            ) : !isKnife ? (
+            {!isKnife ? (
               <>
                 {isGodMode ? (
                   <div className="flex items-center gap-2">

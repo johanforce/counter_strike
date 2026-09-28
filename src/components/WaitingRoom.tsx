@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
-import { RoomState, Team, GameMode, MapId, MAPS_METADATA } from '../types/game';
-import { MapBlueprintModal } from './MapBlueprintModal';
+import { RoomState, Team, GameMode } from '../types/game';
 import {
   Users,
   Copy,
@@ -15,9 +14,7 @@ import {
   Plus,
   Share2,
   Link as LinkIcon,
-  AlertTriangle,
-  MapPin,
-  Info
+  AlertTriangle
 } from 'lucide-react';
 
 interface WaitingRoomProps {
@@ -26,14 +23,12 @@ interface WaitingRoomProps {
   playerName: string;
   roomCode: string;
   mode: GameMode;
-  mapId?: MapId;
   isConnecting: boolean;
   errorMsg?: string | null;
   onStartGame: () => void;
   onLeaveRoom: () => void;
   onSwitchTeam: (team: Team) => void;
   onAddBot: (team: Team) => void;
-  onChangeMap?: (mapId: MapId) => void;
 }
 
 export const WaitingRoom: React.FC<WaitingRoomProps> = ({
@@ -41,21 +36,15 @@ export const WaitingRoom: React.FC<WaitingRoomProps> = ({
   localPlayerId,
   roomCode,
   mode,
-  mapId = 'dust2',
   isConnecting,
   errorMsg,
   onStartGame,
   onLeaveRoom,
   onSwitchTeam,
-  onAddBot,
-  onChangeMap
+  onAddBot
 }) => {
   const [copiedCode, setCopiedCode] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
-  const [isMapModalOpen, setIsMapModalOpen] = useState(false);
-
-  const activeMapId: MapId = roomState?.mapId || mapId || 'dust2';
-  const mapMeta = MAPS_METADATA[activeMapId] || MAPS_METADATA.dust2;
 
   const handleCopyCode = () => {
     navigator.clipboard.writeText(roomCode);
@@ -169,59 +158,6 @@ export const WaitingRoom: React.FC<WaitingRoomProps> = ({
                   <span>Chép Link mời</span>
                 </>
               )}
-            </button>
-          </div>
-        </div>
-
-        {/* Map Selection & Blueprint Banner */}
-        <div className="shrink-0 bg-neutral-900/90 border border-neutral-800 rounded-xl p-3 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-lg">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-amber-500/20 border border-amber-500/50 flex items-center justify-center text-amber-400 shrink-0">
-              <MapPin className="w-4 h-4" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-black text-white uppercase tracking-wider">
-                  Bản đồ: {mapMeta.name} ({mapMeta.code.toUpperCase()})
-                </span>
-                <span className="text-[10px] px-2 py-0.5 rounded font-bold" style={{ backgroundColor: `${mapMeta.accentColor}25`, color: mapMeta.accentColor, border: `1px solid ${mapMeta.accentColor}50` }}>
-                  {mapMeta.vietnameseName}
-                </span>
-                <span className="text-[10px] text-emerald-400 font-bold bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-800">
-                  CHẠM 7 THẮNG LÀ WIN
-                </span>
-              </div>
-              <p className="text-[10.5px] text-neutral-400">{mapMeta.tagline}</p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            {isHost && onChangeMap ? (
-              <div className="flex items-center gap-1 bg-black/60 p-1 rounded-lg border border-neutral-800">
-                {(['dust2', 'mirage', 'inferno'] as MapId[]).map((mId) => (
-                  <button
-                    key={mId}
-                    type="button"
-                    onClick={() => onChangeMap(mId)}
-                    className={`px-2 py-1 rounded text-[10.5px] font-bold transition-all cursor-pointer ${
-                      activeMapId === mId
-                        ? 'bg-amber-500 text-black shadow-md'
-                        : 'text-neutral-400 hover:text-white'
-                    }`}
-                  >
-                    {mId === 'dust2' ? 'Dust II' : mId === 'mirage' ? 'Mirage' : 'Inferno'}
-                  </button>
-                ))}
-              </div>
-            ) : null}
-
-            <button
-              type="button"
-              onClick={() => setIsMapModalOpen(true)}
-              className="px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-amber-300 border border-neutral-700 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
-            >
-              <Info className="w-3.5 h-3.5 text-amber-400" />
-              <span>Xem Sơ Đồ & Smoke</span>
             </button>
           </div>
         </div>
@@ -475,17 +411,8 @@ export const WaitingRoom: React.FC<WaitingRoomProps> = ({
         </div>
       </main>
 
-      {/* Map Blueprint Modal */}
-      <MapBlueprintModal
-        isOpen={isMapModalOpen}
-        mapId={activeMapId}
-        onClose={() => setIsMapModalOpen(false)}
-        onSelectMap={onChangeMap}
-        selectable={isHost}
-      />
-
       <footer className="relative z-10 text-[10px] text-neutral-500 shrink-0">
-        Bản đồ: {mapMeta.name} ({mapMeta.code.toUpperCase()}) • Chế độ {activeMode.toUpperCase()} • Đội chạm 7 hiệp thắng trước là WIN
+        Bản đồ: de_dust_classic • Chế độ {activeMode.toUpperCase()} • Tiêu diệt toàn bộ đối phương (Người + Bot) để thắng hiệp
       </footer>
     </div>
   );

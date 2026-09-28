@@ -13,8 +13,7 @@ import {
   BotDifficulty,
   RoomState,
   ChatMessage,
-  CS_BUY_ITEMS,
-  MapId
+  CS_BUY_ITEMS
 } from './types/game';
 import { FPSGameEngine } from './game/engine';
 import { HUD } from './components/HUD';
@@ -28,7 +27,6 @@ interface GameConfig {
   playerName: string;
   team: Team;
   mode: GameMode;
-  mapId?: MapId;
   isOnline: boolean;
   roomCode?: string;
   botDifficulty: BotDifficulty;
@@ -88,27 +86,15 @@ export default function App() {
   const [respawnTimer, setRespawnTimer] = useState<number>(0);
   const [killFeed, setKillFeed] = useState<KillFeedEvent[]>([]);
   const [radarData, setRadarData] = useState<{
-    playerPos: { x: number; y?: number; z: number; rotY: number };
-    allies: { x: number; y?: number; z: number; name?: string; rotY?: number }[];
-    enemies: { x: number; y?: number; z: number; rotY?: number }[];
-    mapId?: MapId;
-    obstacles?: any[];
-    bombsites?: any[];
-    activeSmokes?: any[];
+    playerPos: { x: number; y: number; z: number; rotY: number };
+    allies: { x: number; y: number; z: number; name?: string; rotY?: number }[];
+    enemies: { x: number; y: number; z: number; rotY?: number }[];
   } | null>(null);
   const [roundStatus, setRoundStatus] = useState<{
     show: boolean;
     winner?: 'red' | 'blue' | 'draw';
     message: string;
   }>({ show: false, message: '' });
-
-  // Grenades & Effects States
-  const [heGrenades, setHeGrenades] = useState<number>(1);
-  const [smokeGrenades, setSmokeGrenades] = useState<number>(1);
-  const [inSmoke, setInSmoke] = useState<boolean>(false);
-  const [targetWins, setTargetWins] = useState<number>(7);
-  const [radioSubtitle, setRadioSubtitle] = useState<{ text: string; sender: string } | null>(null);
-  const radioSubtitleTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Scoreboard Tab Key
   const [isScoreboardOpen, setIsScoreboardOpen] = useState<boolean>(false);

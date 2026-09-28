@@ -59,24 +59,6 @@ function WeaponSilhouette({ id }: { id: string }) {
           <path d="M6 20h26v-3h20v-6h6l4 2h24l4-2h6v6h38v2h50v3h-50v3H92v11H80V23H58l-4 11H42l3-9H32v5H6z" />
         </svg>
       );
-    case 'hegrenade':
-      return (
-        <svg viewBox="0 0 80 44" className="w-16 h-9 fill-current text-red-400">
-          <path d="M35 4h10v6h-10zM30 10h20v22c0 4-4 8-10 8s-10-4-10-8V10z" />
-          <circle cx="48" cy="8" r="3" fill="none" stroke="currentColor" strokeWidth="2" />
-          <path d="M28 14h24M28 20h24M28 26h24M34 10v26M46 10v26" stroke="#000" strokeWidth="1.2" opacity="0.4" />
-        </svg>
-      );
-    case 'smokegrenade':
-      return (
-        <svg viewBox="0 0 80 44" className="w-16 h-9 fill-current text-cyan-400">
-          <rect x="30" y="6" width="20" height="32" rx="3" />
-          <rect x="36" y="2" width="8" height="4" />
-          <circle cx="46" cy="5" r="2.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
-          <line x1="33" y1="14" x2="47" y2="14" stroke="#000" strokeWidth="2" opacity="0.4" />
-          <line x1="33" y1="20" x2="47" y2="20" stroke="#000" strokeWidth="2" opacity="0.4" />
-        </svg>
-      );
     default:
       return null;
   }
@@ -93,7 +75,7 @@ export const BuyMenu: React.FC<BuyMenuProps> = ({
   onBuyItem,
   onClose
 }) => {
-  const [activeTab, setActiveTab] = useState<'all' | 'weapons' | 'grenades' | 'gear'>('all');
+  const [activeTab, setActiveTab] = useState<'all' | 'weapons' | 'gear'>('all');
 
   useEffect(() => {
     if (!isOpen) return;
@@ -116,8 +98,7 @@ export const BuyMenu: React.FC<BuyMenuProps> = ({
   if (!isOpen) return null;
 
   const filteredItems = CS_BUY_ITEMS.filter((it) => {
-    if (activeTab === 'weapons') return it.category === 'rifles' || it.category === 'smgs' || it.category === 'pistols';
-    if (activeTab === 'grenades') return it.category === 'grenades';
+    if (activeTab === 'weapons') return it.category !== 'gear';
     if (activeTab === 'gear') return it.category === 'gear';
     return true;
   });
@@ -195,16 +176,6 @@ export const BuyMenu: React.FC<BuyMenuProps> = ({
               Súng CS:GO (1-7)
             </button>
             <button
-              onClick={() => setActiveTab('grenades')}
-              className={`px-3 py-1 rounded text-xs font-bold uppercase transition-colors cursor-pointer ${
-                activeTab === 'grenades'
-                  ? 'bg-amber-500 text-black'
-                  : 'bg-neutral-800/80 text-neutral-400 hover:text-white'
-              }`}
-            >
-              Lựu Đạn (8-9)
-            </button>
-            <button
               onClick={() => setActiveTab('gear')}
               className={`px-3 py-1 rounded text-xs font-bold uppercase transition-colors cursor-pointer ${
                 activeTab === 'gear'
@@ -212,7 +183,7 @@ export const BuyMenu: React.FC<BuyMenuProps> = ({
                   : 'bg-neutral-800/80 text-neutral-400 hover:text-white'
               }`}
             >
-              Giáp & Đạn
+              Giáp & Đạn (8-0)
             </button>
           </div>
 

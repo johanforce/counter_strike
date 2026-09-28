@@ -1217,8 +1217,6 @@ export function createPlayerMesh(team: Team, name: string): {
   const smgMesh = createMiniSMG();
   const pistolMesh = createMiniPistol();
   const knifeMesh = createMiniKnife();
-  const heMesh = createMiniGrenade('he');
-  const smokeMesh = createMiniGrenade('smoke');
 
   weaponHolder.add(akMesh);
   weaponHolder.add(m4Mesh);
@@ -1226,8 +1224,6 @@ export function createPlayerMesh(team: Team, name: string): {
   weaponHolder.add(smgMesh);
   weaponHolder.add(pistolMesh);
   weaponHolder.add(knifeMesh);
-  weaponHolder.add(heMesh);
-  weaponHolder.add(smokeMesh);
 
   const updateWeapon = (type: WeaponType) => {
     akMesh.visible = type === 'ak47';
@@ -1236,8 +1232,6 @@ export function createPlayerMesh(team: Team, name: string): {
     smgMesh.visible = type === 'mp9' || type === 'xm1014';
     pistolMesh.visible = type === 'pistol' || type === 'usp';
     knifeMesh.visible = type === 'knife';
-    heMesh.visible = type === 'hegrenade';
-    smokeMesh.visible = type === 'smokegrenade';
   };
   updateWeapon('usp');
 
@@ -1378,203 +1372,5 @@ function createMiniKnife(): THREE.Group {
   const handle = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.1, 0.03), gunMetalMat);
   handle.position.set(0, -0.04, 0.03);
   g.add(handle);
-  return g;
-}
-
-function createMiniGrenade(type: 'he' | 'smoke'): THREE.Group {
-  const g = new THREE.Group();
-  if (type === 'he') {
-    const heMat = new THREE.MeshStandardMaterial({ color: 0x3d4a2b, roughness: 0.6 });
-    const body = new THREE.Mesh(new THREE.SphereGeometry(0.04, 12, 12), heMat);
-    g.add(body);
-    const topPin = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.03, 8), darkSteelMat);
-    topPin.position.set(0, 0.04, 0);
-    g.add(topPin);
-  } else {
-    const smokeMat = new THREE.MeshStandardMaterial({ color: 0x8a9299, roughness: 0.5 });
-    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.1, 12), smokeMat);
-    g.add(body);
-    const topCap = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.025, 8), darkSteelMat);
-    topCap.position.set(0, 0.055, 0);
-    g.add(topCap);
-  }
-  return g;
-}
-
-// ---------------------------------------------------------------------------
-// First Person HE Grenade (Olive Drab Segmented Fragmentation Grenade)
-// ---------------------------------------------------------------------------
-export function createFirstPersonHEGrenade(): {
-  group: THREE.Group;
-  grenadeBody: THREE.Group;
-  pinRing: THREE.Mesh;
-} {
-  const group = new THREE.Group();
-  const grenadeBody = new THREE.Group();
-
-  const heGreenMat = new THREE.MeshStandardMaterial({
-    color: 0x3a4b2c,
-    roughness: 0.55,
-    metalness: 0.2
-  });
-
-  // Egg/oval fragmentation body
-  const bodyGeo = new THREE.SphereGeometry(0.052, 20, 20);
-  bodyGeo.scale(1, 1.25, 1);
-  const mainSphere = new THREE.Mesh(bodyGeo, heGreenMat);
-  mainSphere.castShadow = true;
-  grenadeBody.add(mainSphere);
-
-  // Serration grooves
-  for (let i = -2; i <= 2; i++) {
-    const groove = new THREE.Mesh(new THREE.TorusGeometry(0.052, 0.003, 8, 20), darkSteelMat);
-    groove.rotation.x = Math.PI / 2;
-    groove.position.y = i * 0.022;
-    grenadeBody.add(groove);
-  }
-
-  // Steel neck & fuse mechanism
-  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.018, 0.038, 16), darkSteelMat);
-  neck.position.y = 0.075;
-  grenadeBody.add(neck);
-
-  // Safety lever (spoon) curving along the body
-  const lever = new THREE.Mesh(new THREE.BoxGeometry(0.014, 0.11, 0.006), darkSteelMat);
-  lever.position.set(0, 0.038, 0.048);
-  lever.rotation.x = 0.12;
-  grenadeBody.add(lever);
-
-  // Pull Ring & Split Pin
-  const pinRing = new THREE.Mesh(new THREE.TorusGeometry(0.016, 0.003, 8, 16), polishedSteelMat);
-  pinRing.rotation.y = Math.PI / 2;
-  pinRing.position.set(-0.026, 0.082, 0.01);
-  grenadeBody.add(pinRing);
-
-  // Position grenade in center of hand
-  grenadeBody.position.set(0.18, -0.15, -0.32);
-  group.add(grenadeBody);
-
-  // Gloved hand holding grenade
-  const rightHand = new THREE.Mesh(new THREE.BoxGeometry(0.085, 0.09, 0.08), gloveFabricMat);
-  rightHand.position.set(0.18, -0.18, -0.31);
-  group.add(rightHand);
-
-  // Forearm extending down
-  const forearm = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.06, 0.44, 20), armSleeveMat);
-  forearm.position.set(0.24, -0.32, -0.18);
-  forearm.rotation.set(0.7, -0.25, 0.2);
-  group.add(forearm);
-
-  return { group, grenadeBody, pinRing };
-}
-
-// ---------------------------------------------------------------------------
-// First Person Smoke Grenade (Metal Canister with emission vent holes)
-// ---------------------------------------------------------------------------
-export function createFirstPersonSmokeGrenade(): {
-  group: THREE.Group;
-  canisterBody: THREE.Group;
-  pinRing: THREE.Mesh;
-} {
-  const group = new THREE.Group();
-  const canisterBody = new THREE.Group();
-
-  const smokeGreyMat = new THREE.MeshStandardMaterial({
-    color: 0x939ba3,
-    roughness: 0.45,
-    metalness: 0.35
-  });
-
-  const whiteStripeMat = new THREE.MeshStandardMaterial({
-    color: 0xeeeeee,
-    roughness: 0.6
-  });
-
-  // Cylindrical canister body
-  const canGeo = new THREE.CylinderGeometry(0.045, 0.045, 0.16, 24);
-  const canister = new THREE.Mesh(canGeo, smokeGreyMat);
-  canisterBody.add(canister);
-
-  // White identification band
-  const band = new THREE.Mesh(new THREE.CylinderGeometry(0.046, 0.046, 0.035, 24), whiteStripeMat);
-  band.position.y = 0.02;
-  canisterBody.add(band);
-
-  // Top cap with vent holes
-  const topCap = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.045, 0.025, 20), darkSteelMat);
-  topCap.position.y = 0.09;
-  canisterBody.add(topCap);
-
-  // Safety lever
-  const lever = new THREE.Mesh(new THREE.BoxGeometry(0.015, 0.12, 0.006), darkSteelMat);
-  lever.position.set(0, 0.045, 0.045);
-  canisterBody.add(lever);
-
-  // Pull Ring
-  const pinRing = new THREE.Mesh(new THREE.TorusGeometry(0.016, 0.003, 8, 16), polishedSteelMat);
-  pinRing.rotation.y = Math.PI / 2;
-  pinRing.position.set(-0.028, 0.095, 0.01);
-  canisterBody.add(pinRing);
-
-  canisterBody.position.set(0.18, -0.15, -0.32);
-  group.add(canisterBody);
-
-  // Gloved hand
-  const rightHand = new THREE.Mesh(new THREE.BoxGeometry(0.085, 0.09, 0.08), gloveFabricMat);
-  rightHand.position.set(0.18, -0.18, -0.31);
-  group.add(rightHand);
-
-  // Forearm
-  const forearm = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.06, 0.44, 20), armSleeveMat);
-  forearm.position.set(0.24, -0.32, -0.18);
-  forearm.rotation.set(0.7, -0.25, 0.2);
-  group.add(forearm);
-
-  return { group, canisterBody, pinRing };
-}
-
-// ---------------------------------------------------------------------------
-// World 3D Grenade Mesh (Physics Entity thrown in world space)
-// ---------------------------------------------------------------------------
-export function createWorldGrenadeMesh(type: 'he' | 'smoke'): THREE.Group {
-  const g = new THREE.Group();
-  if (type === 'he') {
-    const heMat = new THREE.MeshStandardMaterial({
-      color: 0x3d4e2d,
-      roughness: 0.5,
-      metalness: 0.25
-    });
-    const body = new THREE.Mesh(new THREE.SphereGeometry(0.075, 14, 14), heMat);
-    body.scale.set(1, 1.25, 1);
-    body.castShadow = true;
-    g.add(body);
-
-    const fuse = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.025, 0.05, 10), darkSteelMat);
-    fuse.position.y = 0.11;
-    fuse.castShadow = true;
-    g.add(fuse);
-
-    const spoon = new THREE.Mesh(new THREE.BoxGeometry(0.016, 0.14, 0.008), darkSteelMat);
-    spoon.position.set(0, 0.05, 0.07);
-    g.add(spoon);
-  } else {
-    const smokeMat = new THREE.MeshStandardMaterial({
-      color: 0x8a9299,
-      roughness: 0.45,
-      metalness: 0.35
-    });
-    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.2, 16), smokeMat);
-    body.castShadow = true;
-    g.add(body);
-
-    const band = new THREE.Mesh(new THREE.CylinderGeometry(0.062, 0.062, 0.05, 16), new THREE.MeshStandardMaterial({ color: 0xffffff }));
-    band.position.y = 0.02;
-    g.add(band);
-
-    const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.06, 0.035, 16), darkSteelMat);
-    cap.position.y = 0.115;
-    g.add(cap);
-  }
-
   return g;
 }

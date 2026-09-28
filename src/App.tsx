@@ -12,8 +12,10 @@ import {
   GameSettings,
   BotDifficulty,
   RoomState,
+  PlayerNetState,
   ChatMessage,
-  CS_BUY_ITEMS
+  CS_BUY_ITEMS,
+  MapId
 } from './types/game';
 import { FPSGameEngine } from './game/engine';
 import { HUD } from './components/HUD';
@@ -27,6 +29,7 @@ interface GameConfig {
   playerName: string;
   team: Team;
   mode: GameMode;
+  mapId?: MapId;
   isOnline: boolean;
   roomCode?: string;
   botDifficulty: BotDifficulty;
@@ -86,15 +89,27 @@ export default function App() {
   const [respawnTimer, setRespawnTimer] = useState<number>(0);
   const [killFeed, setKillFeed] = useState<KillFeedEvent[]>([]);
   const [radarData, setRadarData] = useState<{
-    playerPos: { x: number; y: number; z: number; rotY: number };
-    allies: { x: number; y: number; z: number; name?: string; rotY?: number }[];
-    enemies: { x: number; y: number; z: number; rotY?: number }[];
+    playerPos: { x: number; y?: number; z: number; rotY: number };
+    allies: { x: number; y?: number; z: number; name?: string; rotY?: number }[];
+    enemies: { x: number; y?: number; z: number; rotY?: number }[];
+    mapId?: MapId;
+    obstacles?: any[];
+    bombsites?: any[];
+    activeSmokes?: any[];
   } | null>(null);
   const [roundStatus, setRoundStatus] = useState<{
     show: boolean;
     winner?: 'red' | 'blue' | 'draw';
     message: string;
   }>({ show: false, message: '' });
+
+  // Grenades & Effects States
+  const [heGrenades, setHeGrenades] = useState<number>(1);
+  const [smokeGrenades, setSmokeGrenades] = useState<number>(1);
+  const [inSmoke, setInSmoke] = useState<boolean>(false);
+  const [targetWins, setTargetWins] = useState<number>(7);
+  const [radioSubtitle, setRadioSubtitle] = useState<{ text: string; sender: string } | null>(null);
+  const radioSubtitleTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Scoreboard Tab Key
   const [isScoreboardOpen, setIsScoreboardOpen] = useState<boolean>(false);
@@ -117,20 +132,136 @@ export default function App() {
   const canvasContainerRef = useRef<HTMLDivElement | null>(null);
   const engineRef = useRef<FPSGameEngine | null>(null);
 
-  // Start game session from Lobby
+  // Helper to build local offline room state for "Chơi với máy"
+  const createOfflineRoomState = (config: GameConfig, myId: string): RoomState => {
+    const is1v1 = config.mode === '1v1';
+    const myTeam = config.team;
+    const oppTeam: Team = myTeam === 'red' ? 'blue' : 'red';
+    const players: PlayerNetState[] = [
+      {
+        id: myId,
+        name: config.playerName || 'Chiến Binh',
+        roomCode: config.roomCode || 'BOT-MATCH',
+        team: myTeam,
+        slot: 0,
+        isBot: false,
+        x: 0,
+        y: 1.6,
+        z: 0,
+        rotY: 0,
+        pitch: 0,
+        health: 100,
+        kills: 0,
+        deaths: 0,
+        weapon: 'usp',
+        isAlive: true,
+        ping: 5,
+        lastActive: Date.now()
+      }
+    ];
+
+    if (!is1v1) {
+      players.push({
+        id: 'bot_ally_1',
+        name: myTeam === 'red' ? 'Bot Bravo' : 'Bot Viper',
+        roomCode: config.roomCode || 'BOT-MATCH',
+        team: myTeam,
+        slot: 1,
+        isBot: true,
+        x: 0,
+        y: 1.6,
+        z: 0,
+        rotY: 0,
+        pitch: 0,
+        health: 100,
+        kills: 0,
+        deaths: 0,
+        weapon: 'ak47',
+        isAlive: true,
+        ping: 0,
+        lastActive: Date.now()
+      });
+    }
+
+    // Enemy Bot 1
+    players.push({
+      id: 'bot_enemy_1',
+      name: oppTeam === 'red' ? 'Bot Alpha' : 'Bot Ghost',
+      roomCode: config.roomCode || 'BOT-MATCH',
+      team: oppTeam,
+      slot: 0,
+      isBot: true,
+      x: 0,
+      y: 1.6,
+      z: 0,
+      rotY: 0,
+      pitch: 0,
+      health: 100,
+      kills: 0,
+      deaths: 0,
+      weapon: 'usp',
+      isAlive: true,
+      ping: 0,
+      lastActive: Date.now()
+    });
+
+    if (!is1v1) {
+      players.push({
+        id: 'bot_enemy_2',
+        name: oppTeam === 'red' ? 'Bot Delta' : 'Bot Phantom',
+        roomCode: config.roomCode || 'BOT-MATCH',
+        team: oppTeam,
+        slot: 1,
+        isBot: true,
+        x: 0,
+        y: 1.6,
+        z: 0,
+        rotY: 0,
+        pitch: 0,
+        health: 100,
+        kills: 0,
+        deaths: 0,
+        weapon: 'm4a1s',
+        isAlive: true,
+        ping: 0,
+        lastActive: Date.now()
+      });
+    }
+
+    return {
+      code: config.roomCode || 'BOT-MATCH',
+      hostId: myId,
+      mode: config.mode,
+      mapId: config.mapId || 'dust2',
+      state: 'waiting',
+      redScore: 0,
+      blueScore: 0,
+      round: 1,
+      maxRounds: 10,
+      targetWins: 7,
+      roundTimeLeft: 90,
+      players
+    };
+  };
+
+  // Start game session from Lobby (enters Waiting Room according to user brief)
   const handleStartGame = (config: GameConfig) => {
     setChatMessages([]);
     setMoney(800);
     setIsGodMode(false);
     setGameConfig(config);
+
     if (config.isOnline) {
       setScreen('waiting');
     } else {
-      setScreen('playing');
+      // Build offline bot room and enter waiting room
+      const offlineRoom = createOfflineRoomState(config, localPlayerId);
+      setRoomState(offlineRoom);
+      setScreen('waiting');
     }
   };
 
-  // Connect to Waiting Room WebSocket
+  // Connect to Waiting Room WebSocket (Online Multiplayer)
   useEffect(() => {
     if (screen !== 'waiting' || !gameConfig || !gameConfig.isOnline) return;
 
@@ -154,6 +285,7 @@ export default function App() {
         playerName: gameConfig.playerName,
         preferredTeam: gameConfig.team,
         mode: gameConfig.mode,
+        mapId: gameConfig.mapId || 'dust2',
         isJoinOnly: gameConfig.isJoinOnly,
         playerId: localPlayerId
       }));
@@ -171,6 +303,8 @@ export default function App() {
         } else if (msg.type === 'match_started') {
           if (msg.room) setRoomState(msg.room);
           setScreen('playing');
+        } else if (msg.type === 'chat_message') {
+          setChatMessages((prev) => [...prev.slice(-25), msg]);
         } else if (msg.type === 'error') {
           setWsError(msg.message || 'Lỗi kết nối phòng');
         }
@@ -194,20 +328,73 @@ export default function App() {
   }, [screen]);
 
   const handleHostStartMatch = () => {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+    if (!gameConfig) return;
+    if (!gameConfig.isOnline) {
+      setScreen('playing');
+    } else if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: 'start_match' }));
     }
   };
 
   const handleSwitchTeam = (newTeam: Team) => {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+    if (!gameConfig) return;
+    if (!gameConfig.isOnline) {
+      const updatedConfig = { ...gameConfig, team: newTeam };
+      setGameConfig(updatedConfig);
+      setRoomState(createOfflineRoomState(updatedConfig, localPlayerId));
+    } else if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: 'switch_team', team: newTeam }));
     }
   };
 
-  const handleAddBot = (team: Team) => {
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: 'add_bot', team }));
+  const handleAddBot = (targetTeam: Team) => {
+    if (!gameConfig) return;
+    if (!gameConfig.isOnline) {
+      setRoomState(prev => {
+        if (!prev) return null;
+        const maxPerTeam = prev.mode === '1v1' ? 1 : 2;
+        const currentCount = prev.players.filter(p => p.team === targetTeam).length;
+        if (currentCount >= maxPerTeam) return prev;
+        const botNames = ['Bot Alpha', 'Bot Bravo', 'Bot Charlie', 'Bot Delta', 'Bot Echo', 'Bot Viper', 'Bot Ghost', 'Bot Phantom'];
+        const existingNames = new Set(prev.players.map(p => p.name));
+        const freeName = botNames.find(n => !existingNames.has(n)) || `Bot_${Math.floor(Math.random() * 90 + 10)}`;
+        const newBot: PlayerNetState = {
+          id: 'bot_' + Math.random().toString(36).substring(2, 7),
+          name: freeName,
+          roomCode: prev.code,
+          team: targetTeam,
+          slot: currentCount,
+          isBot: true,
+          x: 0,
+          y: 1.6,
+          z: 0,
+          rotY: 0,
+          pitch: 0,
+          health: 100,
+          kills: 0,
+          deaths: 0,
+          weapon: 'ak47',
+          isAlive: true,
+          ping: 0,
+          lastActive: Date.now()
+        };
+        return {
+          ...prev,
+          players: [...prev.players, newBot]
+        };
+      });
+    } else if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'add_bot', team: targetTeam }));
+    }
+  };
+
+  const handleChangeMap = (newMapId: MapId) => {
+    if (!gameConfig) return;
+    setGameConfig(prev => prev ? ({ ...prev, mapId: newMapId }) : null);
+    if (!gameConfig.isOnline) {
+      setRoomState(prev => prev ? ({ ...prev, mapId: newMapId }) : null);
+    } else if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'change_map', mapId: newMapId }));
     }
   };
 
@@ -435,6 +622,7 @@ export default function App() {
         playerName: (gameConfig.isOnline && roomState?.players.find(p => p.id === localPlayerId)?.name) || gameConfig.playerName,
         team: (gameConfig.isOnline && roomState?.players.find(p => p.id === localPlayerId)?.team) || gameConfig.team,
         mode: (gameConfig.isOnline && roomState?.mode) || gameConfig.mode,
+        mapId: roomState?.mapId || gameConfig.mapId || 'dust2',
         isOnline: gameConfig.isOnline,
         roomCode: gameConfig.roomCode,
         botDifficulty: gameConfig.botDifficulty,
@@ -486,7 +674,60 @@ export default function App() {
       return;
     }
 
-    // Normal or /all chat
+    const myTeam = (gameConfig?.isOnline && roomState?.players.find(p => p.id === localPlayerId)?.team) || gameConfig?.team || 'red';
+    const myName = (gameConfig?.isOnline && roomState?.players.find(p => p.id === localPlayerId)?.name) || gameConfig?.playerName || 'Bạn';
+
+    // Chat in Waiting Room
+    if (screen === 'waiting') {
+      if (gameConfig?.isOnline) {
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          wsRef.current.send(JSON.stringify({ type: 'chat_message', text: trimmed }));
+        }
+      } else {
+        // Local offline waiting room chat
+        const userMsg: ChatMessage = {
+          id: 'chat_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+          senderId: localPlayerId,
+          senderName: myName,
+          team: myTeam,
+          senderTeam: myTeam,
+          channel: 'all',
+          text: trimmed,
+          timestamp: Date.now()
+        };
+        setChatMessages((prev) => [...prev, userMsg]);
+
+        // Simulated Bot tactical responses in waiting room
+        setTimeout(() => {
+          const BOT_REPLIES = [
+            'Rõ! Tôi sẽ hỗ trợ bạn kê góc súng ngắm AWP.',
+            'Roger that, sẵn sàng tham chiến!',
+            'Chiến thôi anh em, không lùi bước!',
+            'Cứ để tôi bảo vệ bombsite!',
+            'Đã sẵn sàng vũ khí, ném Smoke che đường nhé!'
+          ];
+          const botAlly = roomState?.players.find(p => p.isBot && p.team === myTeam);
+          const botEnemy = roomState?.players.find(p => p.isBot && p.team !== myTeam);
+          const responder = botAlly || botEnemy;
+          if (responder) {
+            const botMsg: ChatMessage = {
+              id: 'chat_bot_' + Date.now(),
+              senderId: responder.id,
+              senderName: responder.name,
+              team: responder.team,
+              senderTeam: responder.team,
+              channel: 'all',
+              text: BOT_REPLIES[Math.floor(Math.random() * BOT_REPLIES.length)],
+              timestamp: Date.now()
+            };
+            setChatMessages((prev) => [...prev, botMsg]);
+          }
+        }, 450);
+      }
+      return;
+    }
+
+    // In-Game Chat
     if (engineRef.current) {
       engineRef.current.sendChatMessage(trimmed);
     }
@@ -532,14 +773,20 @@ export default function App() {
           roomState={roomState}
           localPlayerId={localPlayerId}
           playerName={gameConfig.playerName}
-          roomCode={gameConfig.roomCode || ''}
+          roomCode={gameConfig.roomCode || (gameConfig.isOnline ? '' : 'BOT-MATCH')}
           mode={roomState?.mode || gameConfig.mode}
+          mapId={roomState?.mapId || gameConfig.mapId || 'dust2'}
+          isOnline={gameConfig.isOnline}
+          botDifficulty={gameConfig.botDifficulty}
           isConnecting={isConnectingWs}
           errorMsg={wsError}
+          chatMessages={chatMessages}
+          onSendChatMessage={handleSendChatMessage}
           onStartGame={handleHostStartMatch}
           onLeaveRoom={handleLeaveWaitingRoom}
           onSwitchTeam={handleSwitchTeam}
           onAddBot={handleAddBot}
+          onChangeMap={handleChangeMap}
         />
       )}
 

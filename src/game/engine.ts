@@ -1355,7 +1355,7 @@ export class FPSGameEngine {
     this.mapData.sceneGroup.children.forEach(c => hitCandidates.push(c));
 
     this.botManager.getAllBots().forEach(bot => {
-      if (bot.isAlive && bot.team !== this.team) {
+      if (bot.isAlive) {
         hitCandidates.push(bot.meshData.headMesh);
         hitCandidates.push(bot.meshData.bodyMesh);
         bot.meshData.legsMesh.children.forEach(l => hitCandidates.push(l));
@@ -1363,7 +1363,7 @@ export class FPSGameEngine {
     });
 
     this.remotePlayers.forEach(rp => {
-      if (rp.team !== this.team && rp.health > 0) {
+      if (rp.health > 0) {
         hitCandidates.push(rp.meshData.headMesh);
         hitCandidates.push(rp.meshData.bodyMesh);
         rp.meshData.legsMesh.children.forEach(l => hitCandidates.push(l));
@@ -1519,18 +1519,18 @@ export class FPSGameEngine {
     // Map geometry
     this.mapData.sceneGroup.children.forEach(c => hitCandidates.push(c));
 
-    // Bots
+    // Bots (Friendly Fire ON: includes both enemies and teammates)
     this.botManager.getAllBots().forEach(bot => {
-      if (bot.isAlive && bot.team !== this.team) {
+      if (bot.isAlive) {
         hitCandidates.push(bot.meshData.headMesh);
         hitCandidates.push(bot.meshData.bodyMesh);
         bot.meshData.legsMesh.children.forEach(l => hitCandidates.push(l));
       }
     });
 
-    // Remote players
+    // Remote players (Friendly Fire ON: includes both enemies and teammates)
     this.remotePlayers.forEach(rp => {
-      if (rp.team !== this.team && rp.health > 0) {
+      if (rp.health > 0) {
         hitCandidates.push(rp.meshData.headMesh);
         hitCandidates.push(rp.meshData.bodyMesh);
         rp.meshData.legsMesh.children.forEach(l => hitCandidates.push(l));

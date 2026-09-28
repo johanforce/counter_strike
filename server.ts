@@ -674,7 +674,7 @@ wss.on('connection', (ws: WebSocket) => {
         const target = room.players.get(data.targetId);
         const attacker = room.players.get(data.attackerId || currentPlayerId);
         if (!target || !target.isAlive) return;
-        if (attacker && (!attacker.isAlive || attacker.team === target.team)) return;
+        if (attacker && (!attacker.isAlive || attacker.id === target.id)) return;
 
         const rawDamage = Math.max(1, data.damage || 25);
         const damage = Math.max(1, Math.round(rawDamage));

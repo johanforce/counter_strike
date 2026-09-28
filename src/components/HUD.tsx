@@ -109,6 +109,7 @@ export const HUD: React.FC<HUDProps> = ({
   const timeFormatted = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
 
   const isLowHealth = health <= 30;
+  const isRedTeam = localPlayerTeam === 'red';
   const isKnife = weapon === 'knife';
 
   // Chat & Money State
@@ -904,22 +905,49 @@ export const HUD: React.FC<HUDProps> = ({
 
       {/* 6. Bottom-Left: Retro Health & Armor Display */}
       <div className="absolute bottom-4 left-4 flex items-center gap-4 bg-black/85 backdrop-blur-md px-3.5 py-2.5 rounded-xl border border-neutral-700 shadow-2xl z-20">
-        {/* Health Section */}
+        {/* Health Section (Colorized according to player team: Red Team = Red, Blue Team = Blue) */}
         <div className="flex flex-col gap-1">
           <div className="flex items-center gap-1.5">
-            <span className={`text-xl font-black ${isLowHealth ? 'text-red-500 animate-pulse' : 'text-emerald-400'}`}>
+            <span className={`text-xl font-black ${
+              isLowHealth
+                ? (isRedTeam ? 'text-red-400 animate-pulse' : 'text-blue-300 animate-pulse')
+                : (isRedTeam ? 'text-red-500' : 'text-blue-400')
+            }`}>
               +
             </span>
             <div className="flex flex-col">
-              <span className="text-[9px] text-neutral-400 tracking-wider">MÁU (HP)</span>
-              <span className={`text-2xl font-black tracking-tight leading-none ${isLowHealth ? 'text-red-500' : 'text-emerald-400'}`}>
+              <div className="flex items-center gap-1">
+                <span className="text-[9px] text-neutral-400 tracking-wider">MÁU (HP)</span>
+                <span className={`text-[8.5px] font-black px-1 py-0.2 rounded uppercase ${
+                  isRedTeam
+                    ? 'bg-red-950/80 text-red-400 border border-red-800/50'
+                    : 'bg-blue-950/80 text-blue-400 border border-blue-800/50'
+                }`}>
+                  {isRedTeam ? 'PHE ĐỎ' : 'PHE XANH'}
+                </span>
+              </div>
+              <span className={`text-2xl font-black tracking-tight leading-none ${
+                isRedTeam
+                  ? (isLowHealth ? 'text-red-400 animate-pulse' : 'text-red-500 drop-shadow-[0_0_8px_rgba(239,68,68,0.6)]')
+                  : (isLowHealth ? 'text-blue-300 animate-pulse' : 'text-blue-400 drop-shadow-[0_0_8px_rgba(59,130,246,0.6)]')
+              }`}>
                 {health}
               </span>
             </div>
           </div>
-          <div className="w-20 h-1.5 bg-neutral-800 rounded-full overflow-hidden">
+          <div className={`w-24 h-2 rounded-full overflow-hidden border p-0.5 ${
+            isRedTeam ? 'bg-red-950/40 border-red-900/60' : 'bg-blue-950/40 border-blue-900/60'
+          }`}>
             <div
-              className={`h-full transition-all duration-200 ${isLowHealth ? 'bg-red-500' : 'bg-emerald-400'}`}
+              className={`h-full rounded-full transition-all duration-200 ${
+                isRedTeam
+                  ? (isLowHealth
+                      ? 'bg-red-600 animate-pulse shadow-[0_0_10px_#ef4444]'
+                      : 'bg-gradient-to-r from-red-600 to-red-400 shadow-[0_0_8px_rgba(239,68,68,0.7)]')
+                  : (isLowHealth
+                      ? 'bg-blue-500 animate-pulse shadow-[0_0_10px_#3b82f6]'
+                      : 'bg-gradient-to-r from-blue-600 to-cyan-400 shadow-[0_0_8px_rgba(59,130,246,0.7)]')
+              }`}
               style={{ width: `${Math.max(0, Math.min(100, health))}%` }}
             />
           </div>

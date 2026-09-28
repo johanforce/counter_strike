@@ -111,10 +111,20 @@ export const Scoreboard: React.FC<ScoreboardProps> = ({
                     {p.health <= 0 && <Skull className="w-3.5 h-3.5 text-neutral-500 shrink-0" />}
                   </div>
                   <div className="flex items-center gap-3 shrink-0">
-                    <span className={p.health > 0 ? 'text-emerald-400' : 'text-red-500'}>
-                      {p.health > 0 ? `${p.health} HP` : 'HẠ GỤC'}
-                    </span>
-                    <span className="text-amber-400 font-bold">
+                    <div className="flex items-center gap-2">
+                      <span className={p.health > 0 ? 'text-red-400 font-bold font-mono' : 'text-neutral-500 line-through'}>
+                        {p.health > 0 ? `${p.health} HP` : 'HẠ GỤC'}
+                      </span>
+                      {p.health > 0 && (
+                        <div className="w-14 h-1.5 bg-neutral-900 rounded-full overflow-hidden border border-red-900/50">
+                          <div
+                            className="h-full bg-gradient-to-r from-red-600 to-red-400 rounded-full transition-all duration-200"
+                            style={{ width: `${Math.max(0, Math.min(100, p.health))}%` }}
+                          />
+                        </div>
+                      )}
+                    </div>
+                    <span className="text-amber-400 font-bold font-mono min-w-[36px] text-right">
                       {p.kills} / {p.deaths}
                     </span>
                   </div>
@@ -145,10 +155,20 @@ export const Scoreboard: React.FC<ScoreboardProps> = ({
                     {p.health <= 0 && <Skull className="w-3.5 h-3.5 text-neutral-500 shrink-0" />}
                   </div>
                   <div className="flex items-center gap-3 shrink-0">
-                    <span className={p.health > 0 ? 'text-emerald-400' : 'text-red-500'}>
-                      {p.health > 0 ? `${p.health} HP` : 'HẠ GỤC'}
-                    </span>
-                    <span className="text-amber-400 font-bold">
+                    <div className="flex items-center gap-2">
+                      <span className={p.health > 0 ? 'text-blue-400 font-bold font-mono' : 'text-neutral-500 line-through'}>
+                        {p.health > 0 ? `${p.health} HP` : 'HẠ GỤC'}
+                      </span>
+                      {p.health > 0 && (
+                        <div className="w-14 h-1.5 bg-neutral-900 rounded-full overflow-hidden border border-blue-900/50">
+                          <div
+                            className="h-full bg-gradient-to-r from-blue-600 to-cyan-400 rounded-full transition-all duration-200"
+                            style={{ width: `${Math.max(0, Math.min(100, p.health))}%` }}
+                          />
+                        </div>
+                      )}
+                    </div>
+                    <span className="text-amber-400 font-bold font-mono min-w-[36px] text-right">
                       {p.kills} / {p.deaths}
                     </span>
                   </div>

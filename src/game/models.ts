@@ -1241,7 +1241,7 @@ export function createPlayerMesh(team: Team, name: string): {
   };
   updateWeapon('usp');
 
-  // Overhead Tag (Canvas Sprite showing Name & Health bar)
+  // Overhead Tag (Canvas Sprite showing Name & Health bar colored by Team)
   const tagCanvas = document.createElement('canvas');
   tagCanvas.width = 256;
   tagCanvas.height = 80;
@@ -1251,25 +1251,75 @@ export function createPlayerMesh(team: Team, name: string): {
   const drawTag = (hp: number) => {
     tagCtx.clearRect(0, 0, 256, 80);
 
-    // Name text
-    tagCtx.font = 'bold 24px monospace';
+    const barX = 28;
+    const barY = 44;
+    const barW = 200;
+    const barH = 18;
+    const hpClamped = Math.max(0, Math.min(100, hp));
+    const hpWidth = Math.max(0, Math.min(barW, (hpClamped / 100) * barW));
+
+    // Outer subtle dark badge background
+    tagCtx.fillStyle = isRed ? 'rgba(25, 8, 8, 0.78)' : 'rgba(8, 18, 32, 0.78)';
+    tagCtx.fillRect(16, 6, 224, 66);
+    tagCtx.strokeStyle = isRed ? 'rgba(239, 68, 68, 0.45)' : 'rgba(59, 130, 246, 0.45)';
+    tagCtx.lineWidth = 1;
+    tagCtx.strokeRect(16, 6, 224, 66);
+
+    // Name text with Team color
+    tagCtx.font = 'bold 22px monospace';
     tagCtx.textAlign = 'center';
-    tagCtx.fillStyle = isRed ? '#ff6655' : '#55aaff';
-    tagCtx.fillText(name, 128, 30);
+    tagCtx.textBaseline = 'middle';
+    tagCtx.fillStyle = isRed ? '#ff5c4d' : '#60a5fa';
+    tagCtx.fillText(name, 128, 25);
 
-    // HP background bar
-    tagCtx.fillStyle = 'rgba(0,0,0,0.65)';
-    tagCtx.fillRect(28, 44, 200, 18);
+    // HP background slot (dark with team tint)
+    tagCtx.fillStyle = isRed ? 'rgba(40, 10, 10, 0.9)' : 'rgba(10, 25, 45, 0.9)';
+    tagCtx.fillRect(barX, barY, barW, barH);
 
-    // HP fill bar
-    const hpWidth = Math.max(0, Math.min(200, (hp / 100) * 200));
-    tagCtx.fillStyle = hp > 50 ? '#38d430' : hp > 25 ? '#e09819' : '#e02828';
-    tagCtx.fillRect(28, 44, hpWidth, 18);
+    // HP Fill Bar (Strictly colored according to Team: Red Team = Red hues, Blue Team = Blue hues)
+    if (hpWidth > 0) {
+      const grad = tagCtx.createLinearGradient(barX, barY, barX + hpWidth, barY);
+      if (isRed) {
+        if (hpClamped > 50) {
+          grad.addColorStop(0, '#dc2626');
+          grad.addColorStop(1, '#ff6b6b');
+        } else if (hpClamped > 25) {
+          grad.addColorStop(0, '#b91c1c');
+          grad.addColorStop(1, '#ef4444');
+        } else {
+          grad.addColorStop(0, '#7f1d1d');
+          grad.addColorStop(1, '#dc2626');
+        }
+      } else {
+        if (hpClamped > 50) {
+          grad.addColorStop(0, '#2563eb');
+          grad.addColorStop(1, '#60a5fa');
+        } else if (hpClamped > 25) {
+          grad.addColorStop(0, '#1d4ed8');
+          grad.addColorStop(1, '#38bdf8');
+        } else {
+          grad.addColorStop(0, '#1e3a8a');
+          grad.addColorStop(1, '#2563eb');
+        }
+      }
+      tagCtx.fillStyle = grad;
+      tagCtx.fillRect(barX, barY, hpWidth, barH);
+    }
 
-    // HP border
-    tagCtx.strokeStyle = '#fff';
+    // HP border with Team Color accent
+    tagCtx.strokeStyle = isRed ? '#ef4444' : '#3b82f6';
     tagCtx.lineWidth = 1.5;
-    tagCtx.strokeRect(28, 44, 200, 18);
+    tagCtx.strokeRect(barX, barY, barW, barH);
+
+    // HP Text overlay inside the bar for crystal clear readability
+    tagCtx.font = 'bold 11px monospace';
+    tagCtx.textAlign = 'center';
+    tagCtx.textBaseline = 'middle';
+    tagCtx.fillStyle = '#ffffff';
+    tagCtx.shadowColor = 'rgba(0, 0, 0, 0.9)';
+    tagCtx.shadowBlur = 3;
+    tagCtx.fillText(`${Math.round(hpClamped)} HP`, 128, barY + barH / 2);
+    tagCtx.shadowBlur = 0;
 
     tagTexture.needsUpdate = true;
   };

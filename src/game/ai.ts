@@ -35,6 +35,7 @@ export class BotManager {
   private scene: THREE.Scene;
   private onBotShoot: (bot: BotInstance, origin: THREE.Vector3, dir: THREE.Vector3) => void;
   private onBotKill: (bot: BotInstance, victimId: string, isHeadshot: boolean) => void;
+  public activeSmokes: { position: THREE.Vector3; radius: number }[] = [];
 
   constructor(
     scene: THREE.Scene,
@@ -201,6 +202,19 @@ export class BotManager {
         }
       }
     }
+
+    // Line of sight blocked by thick smoke clouds
+    for (const smoke of this.activeSmokes) {
+      const closestPoint = new THREE.Vector3();
+      ray.closestPointToPoint(smoke.position, closestPoint);
+      if (closestPoint.distanceTo(smoke.position) < smoke.radius * 0.9) {
+        const smokeDist = from.distanceTo(closestPoint);
+        if (smokeDist > 0.5 && smokeDist < dist) {
+          return false; // Vision blocked by tactical smoke cloud!
+        }
+      }
+    }
+
     return true;
   }
 

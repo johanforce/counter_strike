@@ -6,7 +6,9 @@ import {
   KillFeedEvent,
   GameSettings,
   WEAPONS,
-  ChatMessage
+  ChatMessage,
+  MapId,
+  MATCH_TARGET_WINS
 } from '../types/game';
 import { textures } from './textures';
 import {
@@ -18,9 +20,12 @@ import {
   createFirstPersonM4A1S,
   createFirstPersonAWP,
   createFirstPersonKnife,
+  createFirstPersonHEGrenade,
+  createFirstPersonSmokeGrenade,
+  createWorldGrenadeMesh,
   createPlayerMesh
 } from './models';
-import { buildClassicMap, MapData } from './map';
+import { loadMap, MapData, RadarObstacle } from './map';
 import { sounds } from './audio';
 import { BotManager, BotInstance } from './ai';
 
@@ -47,17 +52,28 @@ export interface GameEngineCallbacks {
     isDead: boolean;
     respawnTimer: number;
     headshotKill?: boolean;
+    heGrenades?: number;
+    smokeGrenades?: number;
+    inSmoke?: boolean;
+    targetWins?: number;
+    isMatchOver?: boolean;
+    radioSubtitle?: { text: string; sender: string } | null;
   }) => void;
   onKillFeed: (event: KillFeedEvent) => void;
   onRadarUpdate: (data: {
     playerPos: { x: number; y: number; z: number; rotY: number };
     allies: { x: number; y: number; z: number; name?: string; rotY?: number }[];
     enemies: { x: number; y: number; z: number; rotY?: number }[];
+    mapId?: MapId;
+    obstacles?: RadarObstacle[];
+    bombsites?: { id: 'A' | 'B'; name: string; x: number; z: number }[];
+    activeSmokes?: { x: number; z: number; radius: number }[];
   }) => void;
   onRoundStatus: (status: {
     show: boolean;
     winner?: 'red' | 'blue' | 'draw';
     message: string;
+    isMatchOver?: boolean;
   }) => void;
   onConnectionChange: (connected: boolean) => void;
   onRoomUpdate?: (room: any) => void;
@@ -101,11 +117,40 @@ export class FPSGameEngine {
     ak47: { mag: 30, reserve: 90 },
     m4a1s: { mag: 25, reserve: 75 },
     awp: { mag: 10, reserve: 30 },
-    knife: { mag: 1, reserve: 0 }
+    knife: { mag: 1, reserve: 0 },
+    hegrenade: { mag: 1, reserve: 0 },
+    smokegrenade: { mag: 1, reserve: 0 }
   };
   public isReloading: boolean = false;
   public reloadEndTime: number = 0;
   public isGodMode: boolean = false;
+
+  // Map and Match Win Targets
+  public mapId: MapId = 'dust2';
+  public isMatchOver: boolean = false;
+
+  // Grenade inventory and active physics entities
+  public heGrenades: number = 1;
+  public smokeGrenades: number = 1;
+  public activeGrenades: {
+    mesh: THREE.Group;
+    type: 'he' | 'smoke';
+    position: THREE.Vector3;
+    velocity: THREE.Vector3;
+    rotVelocity: THREE.Vector3;
+    timer: number;
+    throwerId: string;
+    throwerTeam: Team;
+  }[] = [];
+  public activeSmokes: {
+    group: THREE.Group;
+    particles: { mesh: THREE.Mesh; rotSpeed: number; drift: THREE.Vector3 }[];
+    position: THREE.Vector3;
+    radius: number;
+    timer: number;
+    maxDuration: number;
+  }[] = [];
+  public currentRadioSubtitle: { text: string; sender: string; expire: number } | null = null;
 
   // First-person viewmodels
   private fpCameraRig: THREE.Group;
@@ -117,6 +162,8 @@ export class FPSGameEngine {
   private m4a1sRig: ReturnType<typeof createFirstPersonM4A1S>;
   private awpRig: ReturnType<typeof createFirstPersonAWP>;
   private knifeRig: ReturnType<typeof createFirstPersonKnife>;
+  private heRig: ReturnType<typeof createFirstPersonHEGrenade>;
+  private smokeRig: ReturnType<typeof createFirstPersonSmokeGrenade>;
   private muzzleFlashGroup: THREE.Group;
   private muzzleFlashSprite: THREE.Sprite;
   private muzzleFlashLight: THREE.PointLight;
@@ -213,6 +260,7 @@ export class FPSGameEngine {
       localPlayerId?: string;
       initialRoomState?: any;
       isHost?: boolean;
+      mapId?: MapId;
     }
   ) {
     this.container = container;
@@ -223,6 +271,7 @@ export class FPSGameEngine {
     this.mode = options.mode;
     this.isOnlineMode = options.isOnline;
     this.isHost = !!options.isHost;
+    this.mapId = options.mapId || options.initialRoomState?.mapId || 'dust2';
     this.roomCode = options.roomCode || 'SOLO_' + Math.random().toString(36).substring(2, 6).toUpperCase();
     this.localPlayerId = options.localPlayerId || ('player_' + Math.random().toString(36).substring(2, 9));
 
@@ -285,8 +334,8 @@ export class FPSGameEngine {
     const ambientLight = new THREE.AmbientLight(0x555045, 0.4);
     this.scene.add(ambientLight);
 
-    // 3. Build Classic Map (de_dust_classic)
-    this.mapData = buildClassicMap();
+    // 3. Build Map (Dust II / Mirage / Inferno)
+    this.mapData = loadMap(this.mapId);
     this.scene.add(this.mapData.sceneGroup);
 
     // Set initial spawn
@@ -346,6 +395,14 @@ export class FPSGameEngine {
     this.knifeRig.group.position.set(0.24, -0.23, -0.40);
     this.knifeRig.group.visible = false;
     this.fpCameraRig.add(this.knifeRig.group);
+
+    this.heRig = createFirstPersonHEGrenade();
+    this.heRig.group.visible = false;
+    this.fpCameraRig.add(this.heRig.group);
+
+    this.smokeRig = createFirstPersonSmokeGrenade();
+    this.smokeRig.group.visible = false;
+    this.fpCameraRig.add(this.smokeRig.group);
 
     // Muzzle Flash Group - attached directly to the active gun's muzzlePoint!
     this.muzzleFlashGroup = new THREE.Group();
@@ -443,6 +500,12 @@ export class FPSGameEngine {
       this.botManager.addBot('bot_enemy_1', 'Đối Thủ Alpha [BOT]', enemyTeam, enemySpawns[0], difficulty);
       this.botManager.addBot('bot_enemy_2', 'Đối Thủ Bravo [BOT]', enemyTeam, enemySpawns[1], difficulty);
     }
+
+    setTimeout(() => {
+      if (this.disposed) return;
+      sounds.playRadioVoice('gogogo');
+      this.setRadioSubtitle('Go! Go! Go!', 'Chỉ huy');
+    }, 700);
   }
 
   private attachWebSocketListeners() {
@@ -749,6 +812,50 @@ export class FPSGameEngine {
         winner: msg.winner,
         message: msg.reason || (won ? 'CHIẾN THẮNG!' : 'THẤT BẠI!')
       });
+    } else if (msg.type === 'match_ended') {
+      this.isMatchOver = true;
+      this.roundEnded = true;
+      const won = msg.winner === this.team;
+      const winnerName = msg.winner === 'red' ? 'Đội Đỏ' : 'Đội Xanh';
+      if (won) {
+        sounds.playWinSound();
+        sounds.playRadioVoice(msg.winner === 'blue' ? 'ctwin' : 'twin');
+      } else {
+        sounds.playDefeatSound();
+        sounds.playRadioVoice(msg.winner === 'blue' ? 'ctwin' : 'twin');
+      }
+      this.callbacks.onRoundStatus({
+        show: true,
+        winner: msg.winner,
+        message: msg.reason || `🏆 ${winnerName.toUpperCase()} CHIẾN THẮNG CHUNG CUỘC TRẬN ĐẤU!`,
+        isMatchOver: true
+      });
+    } else if (msg.type === 'player_threw_grenade' && (msg as any).throwerId !== this.localPlayerId) {
+      const gType: 'he' | 'smoke' = (msg as any).grenadeType || 'he';
+      const gMesh = createWorldGrenadeMesh(gType);
+      const spawnP = new THREE.Vector3((msg as any).x, (msg as any).y, (msg as any).z);
+      const throwV = new THREE.Vector3((msg as any).vx, (msg as any).vy, (msg as any).vz);
+      gMesh.position.copy(spawnP);
+      this.scene.add(gMesh);
+
+      this.activeGrenades.push({
+        mesh: gMesh,
+        type: gType,
+        position: spawnP,
+        velocity: throwV,
+        rotVelocity: new THREE.Vector3(Math.random() * 8, Math.random() * 8, Math.random() * 8),
+        timer: gType === 'he' ? 2.0 : 1.8,
+        throwerId: (msg as any).throwerId || 'remote',
+        throwerTeam: (msg as any).team || 'blue'
+      });
+
+      if (gType === 'he') {
+        sounds.playRadioVoice('fireinthehole');
+        this.setRadioSubtitle('Fire in the hole!', (msg as any).throwerName || 'Đồng đội');
+      } else {
+        sounds.playRadioVoice('smokeout');
+        this.setRadioSubtitle('Smoke out! Throwing smoke!', (msg as any).throwerName || 'Đồng đội');
+      }
     } else if (msg.type === 'player_left' && msg.playerId) {
       const rp = this.remotePlayers.get(msg.playerId);
       if (rp) {
@@ -912,6 +1019,12 @@ export class FPSGameEngine {
       if (e.code === 'Digit3' || e.key === '3') {
         this.setWeapon('knife');
       }
+      if (e.code === 'Digit4' || e.key === '4') {
+        this.cycleGrenade();
+      }
+      if (e.code === 'KeyG' || (e.key && e.key.toLowerCase() === 'g') || e.keyCode === 71) {
+        this.quickThrowGrenade();
+      }
 
       // Reload
       if (e.code === 'KeyR' || (e.key && e.key.toLowerCase() === 'r') || e.keyCode === 82) {
@@ -975,6 +1088,8 @@ export class FPSGameEngine {
       if (e.button === 0) { // Left click
         if (this.currentWeapon === 'knife') {
           this.triggerKnifeAttack(false); // Quick Slash
+        } else if (this.currentWeapon === 'hegrenade' || this.currentWeapon === 'smokegrenade') {
+          this.throwGrenade(this.currentWeapon === 'hegrenade' ? 'he' : 'smoke');
         } else {
           this.isFiring = true;
           this.triggerShoot();
@@ -1175,9 +1290,11 @@ export class FPSGameEngine {
     this.m4a1sRig.group.visible = weapon === 'm4a1s';
     this.awpRig.group.visible = weapon === 'awp';
     this.knifeRig.group.visible = weapon === 'knife';
+    this.heRig.group.visible = weapon === 'hegrenade';
+    this.smokeRig.group.visible = weapon === 'smokegrenade';
 
     // Move muzzle flash group to the active weapon's muzzle point
-    if (weapon !== 'knife') {
+    if (weapon !== 'knife' && weapon !== 'hegrenade' && weapon !== 'smokegrenade') {
       const rig = this.getActiveFirearmRig(weapon);
       rig.muzzlePoint.add(this.muzzleFlashGroup);
     }
@@ -1229,7 +1346,26 @@ export class FPSGameEngine {
     return bought;
   }
 
+  public buyGrenade(type: 'he' | 'smoke'): boolean {
+    if (type === 'he') {
+      if (this.heGrenades >= 2) return false;
+      this.heGrenades++;
+      this.setWeapon('hegrenade', true);
+      sounds.playEquipSound();
+      return true;
+    } else {
+      if (this.smokeGrenades >= 1) return false;
+      this.smokeGrenades++;
+      this.setWeapon('smokegrenade', true);
+      sounds.playEquipSound();
+      return true;
+    }
+  }
+
   public buyWeapon(weaponType: WeaponType): boolean {
+    if (weaponType === 'hegrenade') return this.buyGrenade('he');
+    if (weaponType === 'smokegrenade') return this.buyGrenade('smoke');
+
     const wData = WEAPONS[weaponType];
     if (!wData || weaponType === 'knife') return false;
 
@@ -1243,6 +1379,242 @@ export class FPSGameEngine {
     this.ammoState[weaponType].reserve = wData.maxReserveAmmo;
     this.setWeapon(weaponType, true);
     return true;
+  }
+
+  public cycleGrenade() {
+    if (this.heGrenades > 0 && this.currentWeapon !== 'hegrenade') {
+      this.setWeapon('hegrenade');
+    } else if (this.smokeGrenades > 0 && this.currentWeapon !== 'smokegrenade') {
+      this.setWeapon('smokegrenade');
+    } else if (this.heGrenades > 0) {
+      this.setWeapon('hegrenade');
+    } else if (this.smokeGrenades > 0) {
+      this.setWeapon('smokegrenade');
+    }
+  }
+
+  public quickThrowGrenade() {
+    if (this.currentWeapon === 'hegrenade' || this.currentWeapon === 'smokegrenade') {
+      this.throwGrenade(this.currentWeapon === 'hegrenade' ? 'he' : 'smoke');
+    } else if (this.heGrenades > 0) {
+      this.throwGrenade('he');
+    } else if (this.smokeGrenades > 0) {
+      this.throwGrenade('smoke');
+    }
+  }
+
+  public throwGrenade(type: 'he' | 'smoke') {
+    if (!this.isAlive) return;
+    if (type === 'he' && this.heGrenades <= 0) return;
+    if (type === 'smoke' && this.smokeGrenades <= 0) return;
+
+    if (type === 'he') {
+      this.heGrenades--;
+      sounds.playRadioVoice('fireinthehole');
+      this.setRadioSubtitle('Fire in the hole!', 'Đồng đội');
+    } else {
+      this.smokeGrenades--;
+      sounds.playRadioVoice('smokeout');
+      this.setRadioSubtitle('Smoke out! Throwing smoke!', 'Đồng đội');
+    }
+
+    const dir = new THREE.Vector3();
+    this.camera.getWorldDirection(dir);
+
+    const spawnPos = this.playerPos.clone();
+    spawnPos.y += 1.4;
+    spawnPos.addScaledVector(dir, 0.4);
+
+    const throwVelocity = dir.clone().multiplyScalar(22.0);
+    throwVelocity.y += 4.5;
+    throwVelocity.addScaledVector(this.playerVelocity, 0.4);
+
+    const rotVel = new THREE.Vector3(
+      (Math.random() - 0.5) * 12,
+      (Math.random() - 0.5) * 8,
+      (Math.random() - 0.5) * 12
+    );
+
+    const grenadeMesh = createWorldGrenadeMesh(type);
+    grenadeMesh.position.copy(spawnPos);
+    this.scene.add(grenadeMesh);
+
+    this.activeGrenades.push({
+      mesh: grenadeMesh,
+      type,
+      position: spawnPos,
+      velocity: throwVelocity,
+      rotVelocity: rotVel,
+      timer: type === 'he' ? 2.0 : 1.8,
+      throwerId: this.localPlayerId,
+      throwerTeam: this.team
+    });
+
+    if (this.isOnlineMode && this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({
+        type: 'throw_grenade',
+        grenadeType: type,
+        x: spawnPos.x,
+        y: spawnPos.y,
+        z: spawnPos.z,
+        vx: throwVelocity.x,
+        vy: throwVelocity.y,
+        vz: throwVelocity.z
+      }));
+    }
+
+    setTimeout(() => {
+      if (this.disposed) return;
+      if (this.currentWeapon === 'hegrenade' && this.heGrenades > 0) {
+        // Keep
+      } else if (this.currentWeapon === 'smokegrenade' && this.smokeGrenades > 0) {
+        // Keep
+      } else {
+        this.setWeapon(this.primaryWeapon || this.secondaryWeapon);
+      }
+    }, 350);
+  }
+
+  public setRadioSubtitle(text: string, sender: string = 'Đồng đội') {
+    this.currentRadioSubtitle = {
+      text,
+      sender,
+      expire: performance.now() + 3200
+    };
+  }
+
+  private detonateGrenade(g: typeof this.activeGrenades[0]) {
+    if (g.type === 'he') {
+      sounds.playExplosion();
+      this.triggerExplosionEffect(g.position);
+
+      const distToLocal = this.playerPos.distanceTo(g.position);
+      if (distToLocal < 18) {
+        this.screenShakeTrauma = Math.min(1.0, this.screenShakeTrauma + (1 - distToLocal / 18) * 0.85);
+      }
+
+      const blastRadius = 9.5;
+
+      // Damage local player
+      if (distToLocal < blastRadius && this.isAlive && !this.isGodMode) {
+        const falloff = 1 - (distToLocal / blastRadius);
+        const rawDmg = Math.round(92 * falloff);
+        const actualDmg = this.armor > 0 ? Math.round(rawDmg * 0.65) : rawDmg;
+        this.health = Math.max(0, this.health - actualDmg);
+        if (this.armor > 0) this.armor = Math.max(0, this.armor - Math.round(rawDmg * 0.35));
+        sounds.playPlayerHurt();
+        if (this.health === 0) {
+          this.handlePlayerDeath(g.throwerId || 'grenade', 'hegrenade', false);
+        }
+      }
+
+      // Damage Bots
+      this.botManager.getAllBots().forEach(bot => {
+        if (!bot.isAlive) return;
+        const d = bot.position.distanceTo(g.position);
+        if (d < blastRadius) {
+          const falloff = 1 - (d / blastRadius);
+          const dmg = Math.round(92 * falloff);
+          bot.takeDamage(dmg);
+          if (!bot.isAlive) {
+            this.handleBotKill(bot, g.throwerId || this.localPlayerId, false, 'hegrenade');
+          }
+        }
+      });
+    } else {
+      sounds.playSmokeHiss();
+      this.deploySmokeCloud(g.position);
+    }
+  }
+
+  private triggerExplosionEffect(pos: THREE.Vector3) {
+    const flashLight = new THREE.PointLight(0xff7722, 6, 22);
+    flashLight.position.copy(pos);
+    flashLight.position.y += 0.5;
+    this.scene.add(flashLight);
+    setTimeout(() => { this.scene.remove(flashLight); }, 140);
+
+    const pCount = 36;
+    const pGeo = new THREE.BufferGeometry();
+    const pPositions = new Float32Array(pCount * 3);
+    const pVelocities: THREE.Vector3[] = [];
+
+    for (let i = 0; i < pCount; i++) {
+      pPositions[i * 3] = pos.x;
+      pPositions[i * 3 + 1] = pos.y + 0.2;
+      pPositions[i * 3 + 2] = pos.z;
+      pVelocities.push(new THREE.Vector3(
+        (Math.random() - 0.5) * 16,
+        Math.random() * 12 + 2,
+        (Math.random() - 0.5) * 16
+      ));
+    }
+    pGeo.setAttribute('position', new THREE.BufferAttribute(pPositions, 3));
+    const pMat = new THREE.PointsMaterial({
+      color: 0xff8833,
+      size: 0.16,
+      blending: THREE.AdditiveBlending,
+      transparent: true,
+      opacity: 0.95
+    });
+    const pMesh = new THREE.Points(pGeo, pMat);
+    this.scene.add(pMesh);
+    this.particles.push({
+      mesh: pMesh,
+      velocities: pVelocities,
+      expire: performance.now() + 800
+    });
+  }
+
+  private deploySmokeCloud(pos: THREE.Vector3) {
+    const group = new THREE.Group();
+    group.position.set(pos.x, 0.4, pos.z);
+
+    const smokeMat = new THREE.MeshStandardMaterial({
+      color: 0xa8b0b5,
+      transparent: true,
+      opacity: 0.78,
+      roughness: 0.95,
+      depthWrite: false
+    });
+
+    const particles: { mesh: THREE.Mesh; rotSpeed: number; drift: THREE.Vector3 }[] = [];
+    const puffCount = 12;
+
+    for (let i = 0; i < puffCount; i++) {
+      const radius = 1.3 + Math.random() * 0.7;
+      const sphereGeo = new THREE.SphereGeometry(radius, 10, 10);
+      const mesh = new THREE.Mesh(sphereGeo, smokeMat);
+
+      const angle = (i / puffCount) * Math.PI * 2;
+      const dist = 0.8 + Math.random() * 2.2;
+      mesh.position.set(
+        Math.cos(angle) * dist,
+        0.6 + Math.random() * 2.2,
+        Math.sin(angle) * dist
+      );
+
+      group.add(mesh);
+      particles.push({
+        mesh,
+        rotSpeed: (Math.random() - 0.5) * 0.4,
+        drift: new THREE.Vector3(
+          (Math.random() - 0.5) * 0.08,
+          0.04 + Math.random() * 0.06,
+          (Math.random() - 0.5) * 0.08
+        )
+      });
+    }
+
+    this.scene.add(group);
+    this.activeSmokes.push({
+      group,
+      particles,
+      position: pos.clone(),
+      radius: 5.2,
+      timer: 18.0,
+      maxDuration: 18.0
+    });
   }
 
   public setGodMode(enabled: boolean) {
@@ -2052,12 +2424,43 @@ export class FPSGameEngine {
       message
     });
 
+    // Check if either team reached 7 wins (First to 7 wins match!)
+    if (this.redScore >= MATCH_TARGET_WINS || this.blueScore >= MATCH_TARGET_WINS) {
+      this.isMatchOver = true;
+      const matchWinner = this.redScore >= MATCH_TARGET_WINS ? 'red' : 'blue';
+      const winnerName = matchWinner === 'red' ? 'Đội Đỏ' : 'Đội Xanh';
+      const isWinner = matchWinner === this.team;
+      const finalMsg = isWinner
+        ? `🏆 ĐỘI CỦA BẠN ĐÃ CHIẾN THẮNG CHUNG CUỘC TRẬN ĐẤU! (7 - ${Math.min(this.redScore, this.blueScore)})`
+        : `💀 ${winnerName.toUpperCase()} ĐÃ ĐẠT 7 CHIẾN THẮNG VÀ ĐOẠT CÚP!`;
+
+      if (isWinner) {
+        sounds.playWinSound();
+        sounds.playRadioVoice(matchWinner === 'blue' ? 'ctwin' : 'twin');
+      } else {
+        sounds.playDefeatSound();
+        sounds.playRadioVoice(matchWinner === 'blue' ? 'ctwin' : 'twin');
+      }
+
+      this.callbacks.onRoundStatus({
+        show: true,
+        winner: matchWinner,
+        message: finalMsg,
+        isMatchOver: true
+      });
+      return; // Do NOT start next round
+    }
+
     setTimeout(() => {
-      if (this.disposed) return;
+      if (this.disposed || this.isMatchOver) return;
       this.currentRound++;
       this.roundTimeLeft = 90;
       this.roundEnded = false;
       this.respawnLocalPlayer();
+
+      // Give utility grenade replenishment
+      if (this.heGrenades === 0) this.heGrenades = 1;
+      if (this.smokeGrenades === 0) this.smokeGrenades = 1;
 
       // Respawn all bots with distinct team spawn slots and round-appropriate CS:GO weapons
       let redBotIdx = this.team === 'red' ? 1 : 0;
@@ -2071,6 +2474,15 @@ export class FPSGameEngine {
 
       this.callbacks.onRoundStatus({ show: false, message: '' });
       sounds.playRoundStart();
+
+      // CS:GO Round start voice line
+      const phrases: ('gogogo' | 'letsroll' | 'lockandload')[] = ['gogogo', 'letsroll', 'lockandload'];
+      const chosen = phrases[Math.floor(Math.random() * phrases.length)];
+      sounds.playRadioVoice(chosen);
+      this.setRadioSubtitle(
+        chosen === 'gogogo' ? 'Go! Go! Go!' : chosen === 'letsroll' ? "Okay, let's roll!" : 'Lock and load, team!',
+        'Chỉ huy'
+      );
     }, 4000);
   }
 
@@ -2377,6 +2789,12 @@ export class FPSGameEngine {
       this.awpRig.group.position.set(0.22, -0.20, -0.42 + this.gunKickZ);
       this.awpRig.group.rotation.set(0.01 + this.gunKickRotX, -0.012, 0);
       this.awpRig.boltMesh.position.z = THREE.MathUtils.lerp(this.awpRig.boltMesh.position.z, -0.02, delta * 18);
+    } else if (this.currentWeapon === 'hegrenade') {
+      this.heRig.group.position.set(0.20, -0.18, -0.36 + this.gunKickZ);
+      this.heRig.group.rotation.set(0.02 + this.gunKickRotX, -0.01, 0);
+    } else if (this.currentWeapon === 'smokegrenade') {
+      this.smokeRig.group.position.set(0.20, -0.18, -0.36 + this.gunKickZ);
+      this.smokeRig.group.rotation.set(0.02 + this.gunKickRotX, -0.01, 0);
     }
 
     // Knife Attack Animation (Slash arc or heavy thrust)
@@ -2445,6 +2863,7 @@ export class FPSGameEngine {
     }
 
     // 4. Update AI Bots (Include local player, bots, and online remote players so 2v2 works with full humans or bots)
+    this.botManager.activeSmokes = this.activeSmokes;
     const potentialTargets = [
       {
         id: this.localPlayerId,
@@ -2528,13 +2947,100 @@ export class FPSGameEngine {
       }
     }
 
+    // 7.5. Active Smokes Simulation
+    for (let i = this.activeSmokes.length - 1; i >= 0; i--) {
+      const s = this.activeSmokes[i];
+      s.timer -= delta;
+      s.particles.forEach(p => {
+        p.mesh.rotation.y += p.rotSpeed * delta;
+        p.mesh.position.addScaledVector(p.drift, delta);
+        if (s.timer > 16.5) {
+          const grow = Math.min(1.0, (18.0 - s.timer) / 1.5);
+          p.mesh.scale.set(grow, grow, grow);
+        } else if (s.timer < 3.0) {
+          const fade = Math.max(0, s.timer / 3.0);
+          (p.mesh.material as THREE.MeshStandardMaterial).opacity = fade * 0.78;
+        }
+      });
+      if (s.timer <= 0) {
+        this.scene.remove(s.group);
+        this.activeSmokes.splice(i, 1);
+      }
+    }
+
+    // 7.6. Active Grenades Physics (Gravity, Air Drag, Elastic Wall/Ground Bounce)
+    for (let i = this.activeGrenades.length - 1; i >= 0; i--) {
+      const g = this.activeGrenades[i];
+      g.timer -= delta;
+      g.velocity.y -= 19.6 * delta;
+      g.velocity.x *= 0.992;
+      g.velocity.z *= 0.992;
+
+      g.position.addScaledVector(g.velocity, delta);
+      g.mesh.position.copy(g.position);
+
+      g.mesh.rotation.x += g.rotVelocity.x * delta;
+      g.mesh.rotation.y += g.rotVelocity.y * delta;
+      g.mesh.rotation.z += g.rotVelocity.z * delta;
+
+      // Floor bounce
+      if (g.position.y <= 0.12) {
+        g.position.y = 0.12;
+        if (Math.abs(g.velocity.y) > 0.6 || Math.hypot(g.velocity.x, g.velocity.z) > 1.2) {
+          sounds.playGrenadeBounce();
+        }
+        g.velocity.y = -g.velocity.y * 0.45;
+        g.velocity.x *= 0.72;
+        g.velocity.z *= 0.72;
+        g.rotVelocity.multiplyScalar(0.7);
+      }
+
+      // Map solid box colliders bounce
+      for (const col of this.mapData.colliders) {
+        const rad = 0.15;
+        if (
+          g.position.x + rad > col.minX &&
+          g.position.x - rad < col.maxX &&
+          g.position.y + rad > col.minY &&
+          g.position.y - rad < col.maxY &&
+          g.position.z + rad > col.minZ &&
+          g.position.z - rad < col.maxZ
+        ) {
+          const dxMin = Math.abs(g.position.x + rad - col.minX);
+          const dxMax = Math.abs(col.maxX - (g.position.x - rad));
+          const dzMin = Math.abs(g.position.z + rad - col.minZ);
+          const dzMax = Math.abs(col.maxZ - (g.position.z - rad));
+          const minDepth = Math.min(dxMin, dxMax, dzMin, dzMax);
+
+          if (minDepth === dxMin || minDepth === dxMax) {
+            g.velocity.x = -g.velocity.x * 0.55;
+            g.position.x += minDepth === dxMin ? -0.05 : 0.05;
+          } else {
+            g.velocity.z = -g.velocity.z * 0.55;
+            g.position.z += minDepth === dzMin ? -0.05 : 0.05;
+          }
+
+          if (g.velocity.length() > 1.2) {
+            sounds.playGrenadeBounce();
+          }
+          break;
+        }
+      }
+
+      if (g.timer <= 0) {
+        this.detonateGrenade(g);
+        this.scene.remove(g.mesh);
+        this.activeGrenades.splice(i, 1);
+      }
+    }
+
     // 8. Spectate/round-wait timer when dead (Players respawn on next round in CS:GO elimination)
     if (!this.isAlive && this.respawnTimer > 0) {
       this.respawnTimer = Math.max(0, this.respawnTimer - delta);
     }
 
     // 9. Match timer countdown (Offline mode)
-    if (!this.isOnlineMode && !this.roundEnded && this.roundTimeLeft > 0) {
+    if (!this.isOnlineMode && !this.roundEnded && this.roundTimeLeft > 0 && !this.isMatchOver) {
       this.roundTimeLeft = Math.max(0, this.roundTimeLeft - delta);
       if (this.roundTimeLeft === 0) {
         this.triggerRoundEnd('draw', 'Hết thời gian thi đấu!');
@@ -2603,8 +3109,19 @@ export class FPSGameEngine {
     this.callbacks.onRadarUpdate({
       playerPos: { x: this.playerPos.x, y: this.playerPos.y, z: this.playerPos.z, rotY: this.yaw },
       allies,
-      enemies
+      enemies,
+      mapId: this.mapId,
+      obstacles: this.mapData.radarObstacles,
+      bombsites: this.mapData.bombsites,
+      activeSmokes: this.activeSmokes.map(s => ({ x: s.position.x, z: s.position.z, radius: s.radius }))
     });
+
+    // Check if player is currently standing inside any active smoke cloud
+    const inSmoke = this.activeSmokes.some(s => this.playerPos.distanceTo(s.position) < s.radius);
+
+    const activeSubtitle = this.currentRadioSubtitle && performance.now() < this.currentRadioSubtitle.expire
+      ? { text: this.currentRadioSubtitle.text, sender: this.currentRadioSubtitle.sender }
+      : null;
 
     // 12. Push HUD Update to React
     this.callbacks.onHUDUpdate({
@@ -2626,7 +3143,13 @@ export class FPSGameEngine {
       isLocked: this.isPointerLocked,
       hitMarker: false,
       isDead: !this.isAlive,
-      respawnTimer: Math.ceil(this.respawnTimer)
+      respawnTimer: Math.ceil(this.respawnTimer),
+      heGrenades: this.heGrenades,
+      smokeGrenades: this.smokeGrenades,
+      inSmoke,
+      targetWins: MATCH_TARGET_WINS,
+      isMatchOver: this.isMatchOver,
+      radioSubtitle: activeSubtitle
     });
 
     // 13. Render 3D Scene

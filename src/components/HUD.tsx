@@ -38,6 +38,7 @@ interface HUDProps {
     show: boolean;
     winner?: 'red' | 'blue' | 'draw';
     message: string;
+    isMatchOver?: boolean;
   };
   onRequestLock: () => void;
   onOpenSettings: () => void;
@@ -1112,8 +1113,8 @@ export const HUD: React.FC<HUDProps> = ({
         </div>
       )}
 
-      {/* 10. Round Victory / Defeat Announcement Banner */}
-      {roundStatus.show && (
+      {/* 10. Round Victory / Defeat Announcement Banner (Only for regular round ends, not match end) */}
+      {roundStatus.show && !roundStatus.isMatchOver && (
         <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 flex flex-col items-center bg-black/90 border-2 border-amber-500 px-8 py-5 rounded-xl shadow-2xl animate-bounce pointer-events-none z-40">
           <span className="text-3xl sm:text-4xl font-black text-amber-400 mb-1.5 text-center">
             {roundStatus.winner === 'red' ? 'ĐỘI ĐỎ THẮNG HIỆP' : roundStatus.winner === 'blue' ? 'ĐỘI XANH THẮNG HIỆP' : 'HÒA HIỆP ĐẤU'}
@@ -1123,7 +1124,7 @@ export const HUD: React.FC<HUDProps> = ({
       )}
 
       {/* 11. Sleek Non-Blocking Click-to-Lock Top Bar */}
-      {!isLocked && !isDead && !isBuyMenuOpen && (
+      {!isLocked && !isDead && !isBuyMenuOpen && !roundStatus.isMatchOver && (
         <div
           onClick={onRequestLock}
           className="absolute top-14 left-1/2 -translate-x-1/2 bg-amber-950/90 hover:bg-amber-900 border-2 border-amber-500/80 px-5 py-2 rounded-full shadow-2xl cursor-pointer pointer-events-auto flex items-center gap-2.5 transition-transform hover:scale-105 z-30"

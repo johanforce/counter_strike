@@ -1,8 +1,8 @@
 import React from 'react';
 import { Team } from '../types/game';
-import { Trophy, Skull, Shield, Bot, User } from 'lucide-react';
+import { Trophy, Skull, Shield, Bot, User, RotateCcw, Users, Home, Crown, CheckCircle2 } from 'lucide-react';
 
-interface PlayerRow {
+export interface PlayerRow {
   id: string;
   name: string;
   team: Team;
@@ -13,8 +13,12 @@ interface PlayerRow {
   isLocal?: boolean;
 }
 
-interface ScoreboardProps {
+export interface ScoreboardProps {
   isOpen: boolean;
+  isMatchOver?: boolean;
+  winner?: Team | 'draw' | null;
+  matchEndMessage?: string;
+  isOnline?: boolean;
   redScore: number;
   blueScore: number;
   currentRound: number;
@@ -26,17 +30,29 @@ interface ScoreboardProps {
     health: number;
   };
   otherPlayers: PlayerRow[];
+  onPlayAgain?: () => void;
+  onReturnToWaitingRoom?: () => void;
+  onReturnToMenu?: () => void;
 }
 
 export const Scoreboard: React.FC<ScoreboardProps> = ({
   isOpen,
+  isMatchOver = false,
+  winner = null,
+  matchEndMessage = '',
+  isOnline = false,
   redScore,
   blueScore,
   currentRound,
   localPlayer,
-  otherPlayers
+  otherPlayers,
+  onPlayAgain,
+  onReturnToWaitingRoom,
+  onReturnToMenu
 }) => {
-  if (!isOpen) return null;
+  // Show scoreboard if user is pressing Tab OR if the match is officially over
+  const shouldRender = isOpen || isMatchOver;
+  if (!shouldRender) return null;
 
   const allPlayers: PlayerRow[] = [
     {
@@ -54,77 +70,150 @@ export const Scoreboard: React.FC<ScoreboardProps> = ({
   const redTeam = allPlayers.filter((p) => p.team === 'red');
   const blueTeam = allPlayers.filter((p) => p.team === 'blue');
 
+  const isLocalWinner = isMatchOver && winner === localPlayer.team;
+  const isOpponentWinner = isMatchOver && winner && winner !== 'draw' && winner !== localPlayer.team;
+
   return (
-    <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-3 font-mono select-none pointer-events-none">
-      <div className="w-full max-w-3xl max-h-[88vh] flex flex-col bg-neutral-900/95 border border-neutral-700 rounded-xl shadow-2xl overflow-hidden">
-        {/* Top Banner */}
-        <div className="shrink-0 bg-neutral-950 px-5 py-3 border-b border-neutral-800 flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <Trophy className="w-4 h-4 text-amber-400" />
-            <span className="font-black text-sm sm:text-base text-amber-400 tracking-wider">
-              BẢNG ĐIỂM CHIẾN TRƯỜNG — HIỆP {currentRound}
+    <div
+      className={`fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 font-mono select-none ${
+        isMatchOver
+          ? 'bg-black/85 backdrop-blur-md pointer-events-auto'
+          : 'bg-black/75 backdrop-blur-sm pointer-events-none'
+      }`}
+    >
+      <div className="w-full max-w-3xl max-h-[92vh] flex flex-col bg-[#0f1218] border border-neutral-700/80 rounded-2xl shadow-2xl overflow-hidden text-neutral-200">
+        {/* Top Header */}
+        {isMatchOver ? (
+          <div className="shrink-0 bg-neutral-950 px-5 py-4 border-b border-neutral-800 text-center space-y-1">
+            <div className="flex items-center justify-center gap-2">
+              <Trophy
+                className={`w-6 h-6 ${
+                  isLocalWinner ? 'text-amber-400 animate-bounce' : 'text-neutral-400'
+                }`}
+              />
+              <h2
+                className={`text-lg sm:text-2xl font-black uppercase tracking-wider ${
+                  isLocalWinner
+                    ? 'text-amber-400'
+                    : isOpponentWinner
+                    ? 'text-red-400'
+                    : 'text-neutral-300'
+                }`}
+              >
+                {isLocalWinner
+                  ? 'CHIẾN THẮNG CHUNG CUỘC!'
+                  : isOpponentWinner
+                  ? 'THẤT BẠI CHUNG CUỘC'
+                  : 'TRẬN ĐẤU KẾT THÚC HÒA'}
+              </h2>
+            </div>
+            <p className="text-xs text-neutral-400">
+              {matchEndMessage ||
+                (isLocalWinner
+                  ? 'Đội của bạn đã chạm 7 hiệp thắng trước và đoạt cúp vô địch!'
+                  : 'Đội đối phương đã chạm 7 hiệp thắng trước.')}
+            </p>
+          </div>
+        ) : (
+          <div className="shrink-0 bg-neutral-950 px-5 py-3 border-b border-neutral-800 flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <Trophy className="w-4 h-4 text-amber-400" />
+              <span className="font-black text-sm sm:text-base text-amber-400 tracking-wider uppercase">
+                BẢNG ĐIỂM TRẬN ĐẤU — HIỆP {currentRound}
+              </span>
+            </div>
+            <span className="text-[11px] text-neutral-400 font-bold">
+              {isOnline ? 'CHẾ ĐỘ ONLINE' : 'CHẾ ĐỘ BOT AI'}
             </span>
           </div>
-          <span className="text-[11px] text-neutral-500">Bản đồ: de_dust_classic</span>
-        </div>
+        )}
 
-        {/* Team Scores Summary */}
+        {/* Team Scores Summary Bar */}
         <div className="shrink-0 grid grid-cols-2 border-b border-neutral-800">
-          <div className="bg-red-950/30 p-3 flex items-center justify-between border-r border-neutral-800">
+          <div
+            className={`p-3 sm:p-4 flex items-center justify-between border-r border-neutral-800 ${
+              winner === 'red' && isMatchOver ? 'bg-red-950/60 ring-1 ring-inset ring-red-500/50' : 'bg-red-950/20'
+            }`}
+          >
             <div>
-              <span className="text-red-400 font-black text-sm block">ĐỘI ĐỎ (TERRORIST)</span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-red-400 font-black text-xs sm:text-sm">
+                  TERRORIST (PHE ĐỎ)
+                </span>
+                {winner === 'red' && isMatchOver && (
+                  <Crown className="w-3.5 h-3.5 text-amber-400" />
+                )}
+              </div>
               <span className="text-[10px] text-neutral-400">Phe Tấn Công</span>
             </div>
-            <span className="text-3xl font-black text-red-500">{redScore}</span>
+            <span className="text-2xl sm:text-3xl font-black text-red-500 font-mono">
+              {redScore}
+            </span>
           </div>
 
-          <div className="bg-blue-950/30 p-3 flex items-center justify-between">
-            <span className="text-3xl font-black text-blue-500">{blueScore}</span>
+          <div
+            className={`p-3 sm:p-4 flex items-center justify-between ${
+              winner === 'blue' && isMatchOver ? 'bg-blue-950/60 ring-1 ring-inset ring-blue-500/50' : 'bg-blue-950/20'
+            }`}
+          >
+            <span className="text-2xl sm:text-3xl font-black text-blue-500 font-mono">
+              {blueScore}
+            </span>
             <div className="text-right">
-              <span className="text-blue-400 font-black text-sm block">ĐỘI XANH (COUNTER-TERRORIST)</span>
+              <div className="flex items-center justify-end gap-1.5">
+                {winner === 'blue' && isMatchOver && (
+                  <Crown className="w-3.5 h-3.5 text-amber-400" />
+                )}
+                <span className="text-blue-400 font-black text-xs sm:text-sm">
+                  COUNTER-TERRORIST (PHE XANH)
+                </span>
+              </div>
               <span className="text-[10px] text-neutral-400">Phe Phòng Thủ</span>
             </div>
           </div>
         </div>
 
-        {/* Players Table */}
-        <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4 overflow-y-auto flex-1">
+        {/* Players Roster Table */}
+        <div className="p-3 sm:p-4 grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4 overflow-y-auto flex-1 min-h-0">
           {/* Red Team List */}
           <div>
             <div className="text-xs font-bold text-red-400 uppercase mb-2 flex justify-between px-2">
-              <span>Thành viên Đội Đỏ ({redTeam.length})</span>
-              <span>HP / K / D</span>
+              <span>Phe Đỏ ({redTeam.length})</span>
+              <span>HP / KDA (K/D)</span>
             </div>
             <div className="space-y-1.5">
               {redTeam.map((p) => (
                 <div
                   key={p.id}
-                  className={`flex items-center justify-between px-3 py-2 rounded border text-xs ${
+                  className={`flex items-center justify-between px-3 py-2 rounded-xl border text-xs ${
                     p.isLocal
-                      ? 'bg-red-900/30 border-red-500/60 text-white font-bold'
+                      ? 'bg-red-950/50 border-red-500/70 text-white font-bold'
                       : 'bg-neutral-950 border-neutral-800 text-neutral-300'
                   }`}
                 >
                   <div className="flex items-center gap-2 min-w-0">
-                    {p.isBot ? <Bot className="w-3.5 h-3.5 text-neutral-400 shrink-0" /> : <User className="w-3.5 h-3.5 text-red-400 shrink-0" />}
+                    {p.isBot ? (
+                      <Bot className="w-3.5 h-3.5 text-neutral-400 shrink-0" />
+                    ) : (
+                      <User className="w-3.5 h-3.5 text-red-400 shrink-0" />
+                    )}
                     <span className="truncate">{p.name}</span>
-                    {p.health <= 0 && <Skull className="w-3.5 h-3.5 text-neutral-500 shrink-0" />}
+                    {p.isLocal && (
+                      <span className="text-[10px] text-amber-400 font-bold">(Bạn)</span>
+                    )}
+                    {p.health <= 0 && !isMatchOver && (
+                      <Skull className="w-3 h-3 text-neutral-500 shrink-0" />
+                    )}
                   </div>
                   <div className="flex items-center gap-3 shrink-0">
-                    <div className="flex items-center gap-2">
-                      <span className={p.health > 0 ? 'text-red-400 font-bold font-mono' : 'text-neutral-500 line-through'}>
-                        {p.health > 0 ? `${p.health} HP` : 'HẠ GỤC'}
-                      </span>
-                      {p.health > 0 && (
-                        <div className="w-14 h-1.5 bg-neutral-900 rounded-full overflow-hidden border border-red-900/50">
-                          <div
-                            className="h-full bg-gradient-to-r from-red-600 to-red-400 rounded-full transition-all duration-200"
-                            style={{ width: `${Math.max(0, Math.min(100, p.health))}%` }}
-                          />
-                        </div>
-                      )}
-                    </div>
-                    <span className="text-amber-400 font-bold font-mono min-w-[36px] text-right">
+                    <span
+                      className={`font-mono text-xs ${
+                        p.health > 0 ? 'text-red-400 font-bold' : 'text-neutral-500'
+                      }`}
+                    >
+                      {p.health > 0 ? `${p.health} HP` : 'HẠ GỤC'}
+                    </span>
+                    <span className="text-amber-400 font-bold font-mono min-w-[40px] text-right">
                       {p.kills} / {p.deaths}
                     </span>
                   </div>
@@ -136,39 +225,42 @@ export const Scoreboard: React.FC<ScoreboardProps> = ({
           {/* Blue Team List */}
           <div>
             <div className="text-xs font-bold text-blue-400 uppercase mb-2 flex justify-between px-2">
-              <span>Thành viên Đội Xanh ({blueTeam.length})</span>
-              <span>HP / K / D</span>
+              <span>Phe Xanh ({blueTeam.length})</span>
+              <span>HP / KDA (K/D)</span>
             </div>
             <div className="space-y-1.5">
               {blueTeam.map((p) => (
                 <div
                   key={p.id}
-                  className={`flex items-center justify-between px-3 py-2 rounded border text-xs ${
+                  className={`flex items-center justify-between px-3 py-2 rounded-xl border text-xs ${
                     p.isLocal
-                      ? 'bg-blue-900/30 border-blue-500/60 text-white font-bold'
+                      ? 'bg-blue-950/50 border-blue-500/70 text-white font-bold'
                       : 'bg-neutral-950 border-neutral-800 text-neutral-300'
                   }`}
                 >
                   <div className="flex items-center gap-2 min-w-0">
-                    {p.isBot ? <Bot className="w-3.5 h-3.5 text-neutral-400 shrink-0" /> : <User className="w-3.5 h-3.5 text-blue-400 shrink-0" />}
+                    {p.isBot ? (
+                      <Bot className="w-3.5 h-3.5 text-neutral-400 shrink-0" />
+                    ) : (
+                      <User className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                    )}
                     <span className="truncate">{p.name}</span>
-                    {p.health <= 0 && <Skull className="w-3.5 h-3.5 text-neutral-500 shrink-0" />}
+                    {p.isLocal && (
+                      <span className="text-[10px] text-amber-400 font-bold">(Bạn)</span>
+                    )}
+                    {p.health <= 0 && !isMatchOver && (
+                      <Skull className="w-3 h-3 text-neutral-500 shrink-0" />
+                    )}
                   </div>
                   <div className="flex items-center gap-3 shrink-0">
-                    <div className="flex items-center gap-2">
-                      <span className={p.health > 0 ? 'text-blue-400 font-bold font-mono' : 'text-neutral-500 line-through'}>
-                        {p.health > 0 ? `${p.health} HP` : 'HẠ GỤC'}
-                      </span>
-                      {p.health > 0 && (
-                        <div className="w-14 h-1.5 bg-neutral-900 rounded-full overflow-hidden border border-blue-900/50">
-                          <div
-                            className="h-full bg-gradient-to-r from-blue-600 to-cyan-400 rounded-full transition-all duration-200"
-                            style={{ width: `${Math.max(0, Math.min(100, p.health))}%` }}
-                          />
-                        </div>
-                      )}
-                    </div>
-                    <span className="text-amber-400 font-bold font-mono min-w-[36px] text-right">
+                    <span
+                      className={`font-mono text-xs ${
+                        p.health > 0 ? 'text-blue-400 font-bold' : 'text-neutral-500'
+                      }`}
+                    >
+                      {p.health > 0 ? `${p.health} HP` : 'HẠ GỤC'}
+                    </span>
+                    <span className="text-amber-400 font-bold font-mono min-w-[40px] text-right">
                       {p.kills} / {p.deaths}
                     </span>
                   </div>
@@ -178,10 +270,66 @@ export const Scoreboard: React.FC<ScoreboardProps> = ({
           </div>
         </div>
 
-        <div className="shrink-0 bg-neutral-950 px-5 py-2 text-center text-[11px] text-neutral-500 border-t border-neutral-800 flex items-center justify-center gap-2">
-          <Shield className="w-3.5 h-3.5 text-amber-400" />
-          <span>Thả phím TAB để đóng bảng điểm • Tiêu diệt toàn bộ phe địch (người + Bot) để thắng hiệp</span>
-        </div>
+        {/* Footer / Actions Bar */}
+        {isMatchOver ? (
+          <div className="shrink-0 bg-neutral-950 p-4 border-t border-neutral-800 flex flex-col sm:flex-row items-center justify-end gap-2.5">
+            {isOnline ? (
+              <>
+                <button
+                  type="button"
+                  onClick={onReturnToWaitingRoom}
+                  className="w-full sm:w-auto px-5 py-2.5 bg-amber-500 hover:bg-amber-400 text-neutral-950 font-black text-xs sm:text-sm rounded-xl uppercase tracking-wider flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(245,158,11,0.35)] transition-all cursor-pointer"
+                >
+                  <Users className="w-4 h-4 stroke-[2.5]" />
+                  <span>QUAY LẠI PHÒNG ĐỢI</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={onReturnToMenu}
+                  className="w-full sm:w-auto px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 font-bold text-xs sm:text-sm rounded-xl flex items-center justify-center gap-2 border border-neutral-700 transition-colors cursor-pointer"
+                >
+                  <Home className="w-4 h-4" />
+                  <span>QUAY LẠI MENU CHÍNH</span>
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={onPlayAgain}
+                  className="w-full sm:w-auto px-5 py-2.5 bg-amber-500 hover:bg-amber-400 text-neutral-950 font-black text-xs sm:text-sm rounded-xl uppercase tracking-wider flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(245,158,11,0.35)] transition-all cursor-pointer"
+                >
+                  <RotateCcw className="w-4 h-4 stroke-[2.5]" />
+                  <span>CHƠI LẠI TRẬN MỚI</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={onReturnToWaitingRoom}
+                  className="w-full sm:w-auto px-4 py-2.5 bg-neutral-850 hover:bg-neutral-800 text-neutral-300 font-bold text-xs sm:text-sm rounded-xl flex items-center justify-center gap-2 border border-neutral-700 transition-colors cursor-pointer"
+                >
+                  <Users className="w-4 h-4" />
+                  <span>SẢNH CHỜ BOT</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={onReturnToMenu}
+                  className="w-full sm:w-auto px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 font-bold text-xs sm:text-sm rounded-xl flex items-center justify-center gap-2 border border-neutral-700 transition-colors cursor-pointer"
+                >
+                  <Home className="w-4 h-4" />
+                  <span>MENU CHÍNH</span>
+                </button>
+              </>
+            )}
+          </div>
+        ) : (
+          <div className="shrink-0 bg-neutral-950 px-5 py-2 text-center text-xs text-neutral-500 border-t border-neutral-800 flex items-center justify-center gap-2">
+            <Shield className="w-3.5 h-3.5 text-amber-400" />
+            <span>Thả phím TAB để đóng bảng điểm</span>
+          </div>
+        )}
       </div>
     </div>
   );

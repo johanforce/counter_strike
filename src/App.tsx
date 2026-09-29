@@ -101,7 +101,8 @@ export default function App() {
     show: boolean;
     winner?: 'red' | 'blue' | 'draw';
     message: string;
-  }>({ show: false, message: '' });
+    isMatchOver?: boolean;
+  }>({ show: false, message: '', isMatchOver: false });
 
   // Grenades & Effects States
   const [heGrenades, setHeGrenades] = useState<number>(1);
@@ -303,6 +304,11 @@ export default function App() {
         } else if (msg.type === 'match_started') {
           if (msg.room) setRoomState(msg.room);
           setScreen('playing');
+        } else if (msg.type === 'room_reset_to_waiting') {
+          if (msg.room) setRoomState(msg.room);
+          setRoundStatus({ show: false, message: '', isMatchOver: false });
+          setIsScoreboardOpen(false);
+          setScreen('waiting');
         } else if (msg.type === 'chat_message') {
           setChatMessages((prev) => [...prev.slice(-25), msg]);
         } else if (msg.type === 'error') {
@@ -408,6 +414,45 @@ export default function App() {
     setMoney(800);
     setIsGodMode(false);
     setScreen('lobby');
+  };
+
+  // Match Over Action Handlers (Chơi lại nếu bắn máy, Quay lại room đợi nếu online/bot, Quay lại menu chính)
+  const handlePlayAgain = () => {
+    if (engineRef.current) {
+      engineRef.current.restartOfflineMatch();
+    }
+    setRedScore(0);
+    setBlueScore(0);
+    setRound(1);
+    setTimeLeft(90);
+    setMoney(800);
+    setHealth(100);
+    setArmor(0);
+    setHasHelmet(false);
+    setIsDead(false);
+    setRoundStatus({ show: false, message: '', isMatchOver: false });
+    setIsScoreboardOpen(false);
+  };
+
+  const handleReturnToWaitingRoom = () => {
+    if (gameConfig?.isOnline) {
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ type: 'return_to_room' }));
+      }
+    } else {
+      if (gameConfig) {
+        setRoomState(createOfflineRoomState(gameConfig, localPlayerId));
+      }
+    }
+    setRoundStatus({ show: false, message: '', isMatchOver: false });
+    setIsScoreboardOpen(false);
+    setScreen('waiting');
+  };
+
+  const handleReturnToMenu = () => {
+    setRoundStatus({ show: false, message: '', isMatchOver: false });
+    setIsScoreboardOpen(false);
+    handleLeaveWaitingRoom();
   };
 
   // Tactical Buy Menu toggle handler
@@ -834,9 +879,13 @@ export default function App() {
             headshotEffect={headshotEffect}
           />
 
-          {/* Scoreboard (Tab overlay) */}
+          {/* Scoreboard (Tab overlay & Match Over victory screen) */}
           <Scoreboard
             isOpen={isScoreboardOpen}
+            isMatchOver={roundStatus.isMatchOver}
+            winner={roundStatus.winner}
+            matchEndMessage={roundStatus.message}
+            isOnline={gameConfig?.isOnline}
             redScore={redScore}
             blueScore={blueScore}
             currentRound={round}
@@ -870,6 +919,9 @@ export default function App() {
                     isBot: true
                   })) || []
             }
+            onPlayAgain={handlePlayAgain}
+            onReturnToWaitingRoom={handleReturnToWaitingRoom}
+            onReturnToMenu={handleReturnToMenu}
           />
 
           {/* Quick Pause / Exit Button top left */}

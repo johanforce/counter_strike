@@ -815,6 +815,7 @@ export class FPSGameEngine {
     } else if (msg.type === 'match_ended') {
       this.isMatchOver = true;
       this.roundEnded = true;
+      document.exitPointerLock?.();
       const won = msg.winner === this.team;
       const winnerName = msg.winner === 'red' ? 'Đội Đỏ' : 'Đội Xanh';
       if (won) {
@@ -1204,7 +1205,7 @@ export class FPSGameEngine {
   }
 
   public requestLock() {
-    if (this.isPointerLocked) return;
+    if (this.isPointerLocked || this.isMatchOver) return;
     try {
       const p = this.container.requestPointerLock?.();
       if (p && typeof (p as any).catch === 'function') {
@@ -1220,6 +1221,35 @@ export class FPSGameEngine {
   public unlock() {
     this.clearMovementState();
     document.exitPointerLock?.();
+  }
+
+  // Restart match vs Bot AI with fresh scores and respawns
+  public restartOfflineMatch() {
+    this.isMatchOver = false;
+    this.roundEnded = false;
+    this.redScore = 0;
+    this.blueScore = 0;
+    this.currentRound = 1;
+    this.roundTimeLeft = 90;
+    this.heGrenades = 1;
+    this.smokeGrenades = 1;
+    this.respawnLocalPlayer();
+
+    // Respawn all bots with fresh kills/deaths
+    let redBotIdx = this.team === 'red' ? 1 : 0;
+    let blueBotIdx = this.team === 'blue' ? 1 : 0;
+    this.botManager.getAllBots().forEach(bot => {
+      bot.kills = 0;
+      bot.deaths = 0;
+      const teamSpawns = this.mapData.spawns[bot.team];
+      const idx = bot.team === 'red' ? redBotIdx++ : blueBotIdx++;
+      const spawn = teamSpawns[idx % teamSpawns.length] || teamSpawns[0];
+      this.botManager.respawnBot(bot, spawn, 1);
+    });
+
+    this.callbacks.onRoundStatus({ show: false, message: '', isMatchOver: false });
+    sounds.playRoundStart();
+    this.requestLock();
   }
 
   // Send in-game chat message (/all for all-chat, normal for team-chat)
@@ -2442,6 +2472,7 @@ export class FPSGameEngine {
     // Check if either team reached 7 wins (First to 7 wins match!)
     if (this.redScore >= MATCH_TARGET_WINS || this.blueScore >= MATCH_TARGET_WINS) {
       this.isMatchOver = true;
+      document.exitPointerLock?.();
       const matchWinner = this.redScore >= MATCH_TARGET_WINS ? 'red' : 'blue';
       const winnerName = matchWinner === 'red' ? 'Đội Đỏ' : 'Đội Xanh';
       const isWinner = matchWinner === this.team;

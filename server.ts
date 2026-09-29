@@ -714,6 +714,26 @@ wss.on('connection', (ws: WebSocket) => {
         });
       }
 
+      else if (type === 'return_to_room') {
+        const room = rooms.get(currentRoomCode);
+        if (!room) return;
+        room.state = 'waiting';
+        room.round = 1;
+        room.redScore = 0;
+        room.blueScore = 0;
+        room.roundTimeLeft = 90;
+        room.players.forEach(p => {
+          p.health = 100;
+          p.isAlive = true;
+          p.kills = 0;
+          p.deaths = 0;
+        });
+        broadcastToRoom(room, {
+          type: 'room_reset_to_waiting',
+          room: getRoomSnapshot(room)
+        });
+      }
+
       else if (type === 'request_sync') {
         const room = rooms.get(currentRoomCode);
         if (!room) return;

@@ -1,8 +1,6 @@
 {
-  "name": "Strike Classic 3D - Retro FPS 1v1 & 2v2",
-  "description": "Trò chơi bắn súng góc nhìn thứ nhất (FPS) 3D phong cách cổ điển, hỗ trợ đối kháng 1vs1 và 2vs2 với AK-47, súng lục, dao găm và bản đồ chiến thuật.",
+  "name": "Counter-Strike Tactical FPS",
+  "description": "Trải nghiệm Counter-Strike 3D chiến thuật với giao diện tối giản, phòng chờ tinh gọn và cẩm nang bản đồ - vũ khí chuyên sâu.",
   "requestFramePermissions": [],
-  "majorCapabilities": [
-    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
-  ]
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
